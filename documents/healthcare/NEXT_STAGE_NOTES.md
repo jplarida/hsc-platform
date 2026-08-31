@@ -231,35 +231,37 @@ This document outlines the **next phase of documentation** - breaking down our h
 
 ### 5.1 Monitoring Implementation Details
 **Source:** `ENHANCEMENT_OPPORTUNITIES.md` (Monitoring section)
+**Delivered:** `observability/` — docs 01–03. See [`observability/README.md`](observability/README.md); the stack is AWS-native, and SEV1–4 replaces the P1–P4 scheme below.
 
 **Granular Specifications:**
-- [ ] **Application Performance Monitoring**
+- [x] **Application Performance Monitoring**
   - OpenTelemetry instrumentation setup
   - Custom metrics collection and aggregation
   - Distributed tracing implementation
   - Error tracking and alerting configuration
 
-- [ ] **Infrastructure Monitoring**
+- [x] **Infrastructure Monitoring**
   - Server and container monitoring setup
   - Database performance monitoring
   - Network and load balancer monitoring
   - Cost optimization and resource tracking
 
-- [ ] **Business Metrics Dashboards**
+- [x] **Business Metrics Dashboards**
   - Customer usage analytics implementation
   - Revenue and churn tracking dashboards
   - Feature adoption measurement
   - SLA compliance monitoring
 
 ### 5.2 Alerting & Incident Response
+**Delivered:** `observability/` — docs 04–05. See [`observability/README.md`](observability/README.md).
 **Detailed Procedures:**
-- [ ] **Alert Configuration Specifications**
+- [x] **Alert Configuration Specifications**
   - Threshold-based alerting rules
   - Anomaly detection setup
   - Alert routing and escalation procedures
   - Alert fatigue prevention strategies
 
-- [ ] **Incident Response Workflows**
+- [x] **Incident Response Workflows**
   - Incident classification and severity levels
   - Response team communication procedures
   - Post-incident review and documentation
