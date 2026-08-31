@@ -73,40 +73,41 @@ This document outlines the **next phase of documentation** - breaking down our h
 
 ### 2.1 API Detailed Specifications
 **Source:** `API_ARCHITECTURE.md`
+**Delivered:** `api/` — see [`api/README.md`](api/README.md) for the index, and [`api/openapi.yaml`](api/openapi.yaml) for the spec. Each doc lists its corrections to `API_ARCHITECTURE.md`.
 
 **Granular Diagrams Needed:**
-- [ ] **Authentication & Authorization Flows**
+- [x] **Authentication & Authorization Flows**
   - OAuth 2.0 implementation sequence diagrams
   - JWT token lifecycle and refresh flows
   - Role-based access control (RBAC) decision trees
   - API key management and rotation procedures
 
-- [ ] **Endpoint Specification Diagrams**
+- [x] **Endpoint Specification Diagrams**
   - RESTful endpoint design patterns
   - Request/response transformation flows
   - Error handling and status code mappings
   - API versioning and backward compatibility
 
-- [ ] **Rate Limiting & Throttling**
+- [x] **Rate Limiting & Throttling**
   - Rate limiting algorithms (token bucket, sliding window)
   - Per-tenant and per-user quota management
   - Circuit breaker implementation patterns
   - Load balancing and traffic distribution
 
-- [ ] **Third-Party Integration Flows**
+- [x] **Third-Party Integration Flows**
   - Webhook delivery and retry mechanisms
   - OAuth integration with external services
   - API client SDK architecture
   - Integration health monitoring and failover
 
 **Implementation Specifications:**
-- [ ] **OpenAPI/Swagger Documentation**
+- [x] **OpenAPI/Swagger Documentation**
   - Complete API specification files
   - Interactive API documentation
   - Code generation templates
   - API testing and validation suites
 
-- [ ] **Middleware Architecture**
+- [x] **Middleware Architecture**
   - Request logging and monitoring
   - Security middleware stack
   - Response caching strategies

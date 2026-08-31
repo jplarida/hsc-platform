@@ -1,0 +1,1175 @@
+openapi: 3.1.0
+
+info:
+  title: AllGuds Platform API
+  version: "1.0.0"
+  description: |
+    Multi-tenant health, safety and compliance platform API.
+
+    ## Tenancy
+    Every request is scoped to exactly one tenant, taken from the `tenant_id` claim of the
+    bearer token. `X-Tenant-ID` and the request subdomain are diagnostic hints only and are
+    never used for authorization; a mismatch returns `403 TENANT_MISMATCH`.
+
+    ## Records
+    Business entities are stored generically and described by a per-tenant type registry.
+    `/records` is the canonical route. Tenants also expose generated aliases per installed
+    record type (`/patients`, `/appointments`); those resolve to the same handler with `type`
+    fixed and are documented in the tenant-specific version of this spec.
+
+    ## Conventions
+    - Cursor pagination only. Offsets are not supported.
+    - `If-Match` is required on record mutations; omitting it returns `428`.
+    - `Idempotency-Key` is required on creates and sync pushes.
+    - Clients MUST ignore unknown response fields and unknown enum values.
+  contact:
+    name: API Support
+    url: https://docs.allguds.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.allguds.com/v1
+    description: Production (canonical)
+  - url: https://{tenant}.allguds.com/api/v1
+    description: Tenant alias. Routing only - never an authorization input.
+    variables:
+      tenant:
+        default: demo
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Authentication
+  - name: Records
+  - name: Files
+  - name: Sync
+  - name: Webhooks
+  - name: Administration
+
+paths:
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate and open a session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: |
+            Authenticated, or an MFA challenge. Check `mfa_required` before using the tokens.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Account temporarily locked after repeated failures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Rotate the refresh token
+      description: |
+        Returns a new token pair and invalidates the presented refresh token. Presenting an
+        already-used token is treated as replay: the entire session chain is revoked and
+        `TOKEN_REUSE_DETECTED` is returned.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current session
+      responses:
+        '204':
+          description: Session revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /records:
+    get:
+      tags: [Records]
+      summary: List records
+      parameters:
+        - $ref: '#/components/parameters/RecordType'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: updated_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: q
+          in: query
+          description: Full-text search over title and description
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: include_count
+          in: query
+          description: Expensive on large tenants. Off by default.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: A page of records
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Record'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      tags: [Records]
+      summary: Create a record
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordInput'
+      responses:
+        '201':
+          description: Created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Record'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /records/{record_id}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    get:
+      tags: [Records]
+      summary: Get a record
+      responses:
+        '200':
+          description: The record
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Record'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Records]
+      summary: Partially update a record
+      description: |
+        JSON Merge Patch (RFC 7396). `null` clears a field. Requires `If-Match` carrying the
+        record's current version.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Updated
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Record'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+    delete:
+      tags: [Records]
+      summary: Soft-delete a record
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+
+  /records/{record_id}/links:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    get:
+      tags: [Records]
+      summary: List links from and to this record
+      parameters:
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [from, to, both]
+            default: both
+      responses:
+        '200':
+          description: Links
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RecordLink'
+    post:
+      tags: [Records]
+      summary: Link this record to another
+      description: |
+        Rejected with `LINK_RULE_VIOLATION` when no `record_link_rules` row permits the
+        combination of source type, target type and link type, or when the rule's cardinality
+        is already satisfied.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_record_id, link_type]
+              properties:
+                to_record_id:
+                  type: string
+                  format: uuid
+                link_type:
+                  type: string
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '201':
+          description: Link created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RecordLink'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /records/{record_id}/advance:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    post:
+      tags: [Records]
+      summary: Advance the record's workflow state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_state]
+              properties:
+                to_state:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: New state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Record'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /files:
+    post:
+      tags: [Files]
+      summary: Upload a file directly
+      description: |
+        For files up to 10 MB. Larger uploads use the chunked flow at `/files/uploads`.
+        The file is not downloadable until virus scanning completes.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                record_id:
+                  type: string
+                  format: uuid
+                association_type:
+                  type: string
+                  default: attachment
+      responses:
+        '201':
+          description: Accepted and queued for scanning
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/File'
+        '403':
+          description: Storage quota exceeded for the tenant's plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /files/{file_id}/download:
+    parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Files]
+      summary: Download file content
+      description: |
+        Redirects to a short-lived pre-signed storage URL. Returns `409 FILE_NOT_AVAILABLE`
+        while `scan_status` is not `clean`.
+      responses:
+        '302':
+          description: Redirect to pre-signed URL
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: File is not available (still scanning, or quarantined)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /sync/pull:
+    post:
+      tags: [Sync]
+      summary: Pull server changes since a cursor
+      description: |
+        The cursor is an opaque server-issued watermark over `records.version`. Clients echo
+        it back unmodified. Wall-clock timestamps are not accepted as cursors.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id:
+                  type: string
+                  format: uuid
+                cursor:
+                  type: string
+                  description: Omit for a full initial sync.
+                record_types:
+                  type: array
+                  items:
+                    type: string
+                limit:
+                  type: integer
+                  default: 100
+                  maximum: 500
+      responses:
+        '200':
+          description: Changed records
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          changes:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Record'
+                          deletions:
+                            type: array
+                            items:
+                              type: string
+                              format: uuid
+                          next_cursor:
+                            type: string
+                          has_more:
+                            type: boolean
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /sync/push:
+    post:
+      tags: [Sync]
+      summary: Push local changes
+      description: |
+        Returns a per-item outcome. Conflicts are reported inline with both versions; there is
+        no separate conflict-resolution endpoint.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, changes]
+              properties:
+                device_id:
+                  type: string
+                  format: uuid
+                changes:
+                  type: array
+                  items:
+                    type: object
+                    required: [operation, record_id, base_version]
+                    properties:
+                      operation:
+                        type: string
+                        enum: [create, update, delete]
+                      record_id:
+                        type: string
+                        format: uuid
+                      base_version:
+                        type: integer
+                        description: Version the client last saw. Drives conflict detection.
+                      data:
+                        type: object
+                        additionalProperties: true
+      responses:
+        '200':
+          description: Per-item results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SyncResult'
+
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List webhook endpoints
+      responses:
+        '200':
+          description: Endpoints
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Webhook'
+    post:
+      tags: [Webhooks]
+      summary: Create a webhook endpoint
+      description: |
+        The signing secret is returned once in this response and never again. Payloads for
+        PHI record types always contain identifiers only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url, event_types]
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                  format: uri
+                  description: HTTPS only. Private and link-local addresses are rejected.
+                event_types:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Created, including the one-time signing secret
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/Webhook'
+                          - type: object
+                            properties:
+                              signing_secret:
+                                type: string
+                                description: Shown once. Store it now.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /audit-logs:
+    get:
+      tags: [Administration]
+      summary: Read the tenant's audit log
+      description: |
+        Requires `audit:read`. Reading the audit log is itself audited.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: phi_only
+          in: query
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AuditEntry'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token from `/auth/login`. One hour lifetime. The `tenant_id` claim is the sole
+        authoritative tenant context.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Server-to-server key, format `hsc_live_<prefix>_<secret>`. Scoped to a subset of the
+        creating user's permissions. No user identity is associated with key-authenticated
+        requests.
+
+  parameters:
+    RecordId:
+      name: record_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RecordType:
+      name: type
+      in: query
+      description: Record type code from the tenant's registry.
+      schema:
+        type: string
+      example: patient
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque pagination cursor from `meta.page.next_cursor`. Offsets are not supported.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 50
+        minimum: 1
+        maximum: 200
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The record's current version, as returned in `ETag`.
+      schema:
+        type: string
+      example: '"18422"'
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated UUID. Replays return the original response with
+        `Idempotency-Replayed: true`. Reusing a key with a different body is rejected.
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    ETag:
+      description: The record's current version.
+      schema:
+        type: string
+    RateLimitLimit:
+      description: Requests permitted in the current window.
+      schema:
+        type: integer
+    RateLimitRemaining:
+      description: Requests remaining in the current window.
+      schema:
+        type: integer
+
+  responses:
+    Unauthorized:
+      description: |
+        Authentication failed. `TOKEN_EXPIRED` means refresh and retry; `TOKEN_REVOKED` and
+        `TOKEN_REUSE_DETECTED` mean log in again.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: Authenticated but not permitted, or over a plan quota.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: |
+        No such resource in this tenant. Also returned when a resource exists in another
+        tenant, so that existence is not disclosed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ValidationFailed:
+      description: Request understood but semantically invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    PreconditionFailed:
+      description: '`If-Match` did not match the current version. Re-fetch and retry.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    PreconditionRequired:
+      description: '`If-Match` is required on this mutation and was absent.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RateLimited:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+
+    Meta:
+      type: object
+      required: [request_id, timestamp]
+      properties:
+        request_id:
+          type: string
+          description: Quote this when contacting support.
+        timestamp:
+          type: string
+          format: date-time
+        api_version:
+          type: string
+        page:
+          $ref: '#/components/schemas/Page'
+
+    Page:
+      type: object
+      properties:
+        limit:
+          type: integer
+        next_cursor:
+          type: string
+        has_more:
+          type: boolean
+        total:
+          type: integer
+          description: Present only when `include_count=true` was requested.
+
+    Envelope:
+      type: object
+      required: [success, meta]
+      properties:
+        success:
+          type: boolean
+          const: true
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    ErrorEnvelope:
+      type: object
+      required: [success, error, meta]
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          $ref: '#/components/schemas/Error'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: |
+            Stable machine-readable code. Branch on this, never on `message`. New codes may be
+            added within a major version.
+          examples: [VALIDATION_FAILED, INSUFFICIENT_PERMISSIONS, RATE_LIMIT_EXCEEDED]
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        field_errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+
+    Record:
+      type: object
+      required: [record_id, record_type, version, created_at, updated_at]
+      properties:
+        record_id:
+          type: string
+          format: uuid
+        record_type:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        data:
+          type: object
+          description: Validated against the form version referenced by `form_version_id`.
+          additionalProperties: true
+        status:
+          type: string
+        workflow_state:
+          type: string
+        version:
+          type: integer
+          description: Increments on every update. Used for `If-Match` and sync conflicts.
+        form_version_id:
+          type: string
+          format: uuid
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RecordInput:
+      type: object
+      required: [record_type]
+      properties:
+        record_type:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+        external_id:
+          type: string
+          description: Source-system key. Makes repeated imports idempotent.
+
+    RecordLink:
+      type: object
+      required: [link_id, from_record_id, to_record_id, link_type]
+      properties:
+        link_id:
+          type: string
+          format: uuid
+        from_record_id:
+          type: string
+          format: uuid
+        to_record_id:
+          type: string
+          format: uuid
+        link_type:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    File:
+      type: object
+      required: [file_id, original_name, status, scan_status]
+      properties:
+        file_id:
+          type: string
+          format: uuid
+        original_name:
+          type: string
+        mime_type:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [uploading, scanning, available, quarantined, failed, deleted]
+        scan_status:
+          type: string
+          enum: [pending, clean, infected, unscannable, skipped]
+        current_version:
+          type: integer
+        checksum:
+          type: string
+          description: SHA-256 of the stored object.
+        created_at:
+          type: string
+          format: date-time
+
+    SyncResult:
+      type: object
+      required: [record_id, outcome]
+      properties:
+        record_id:
+          type: string
+          format: uuid
+        outcome:
+          type: string
+          enum: [applied, conflict, rejected]
+        server_version:
+          type: integer
+        server_record:
+          $ref: '#/components/schemas/Record'
+        error:
+          $ref: '#/components/schemas/Error'
+
+    Webhook:
+      type: object
+      required: [webhook_id, name, url, event_types, status]
+      properties:
+        webhook_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        event_types:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [active, paused, disabled_on_failure, revoked]
+        consecutive_failures:
+          type: integer
+        last_success_at:
+          type: string
+          format: date-time
+
+    AuditEntry:
+      type: object
+      required: [audit_id, action, timestamp]
+      properties:
+        audit_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          description: Null for API-key and system-originated actions.
+        user_email:
+          type: string
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          format: uuid
+        is_phi_access:
+          type: boolean
+        ip_address:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required: [email, password, tenant_domain]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        tenant_domain:
+          type: string
+        mfa_token:
+          type: string
+        device_info:
+          type: object
+          properties:
+            device_id:
+              type: string
+              format: uuid
+            device_name:
+              type: string
+            os_version:
+              type: string
+            app_version:
+              type: string
+
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                mfa_required:
+                  type: boolean
+                challenge_id:
+                  type: string
+                  description: Present only when `mfa_required` is true.
+                access_token:
+                  type: string
+                refresh_token:
+                  type: string
+                expires_in:
+                  type: integer
+                token_type:
+                  type: string
+                  const: Bearer
+                user:
+                  $ref: '#/components/schemas/CurrentUser'
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, expires_in, token_type]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+        token_type:
+          type: string
+          const: Bearer
+
+    CurrentUser:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          description: Permission codes, e.g. `records:read`.
+          items:
+            type: string
+        tenant:
+          type: object
+          properties:
+            tenant_id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            subdomain:
+              type: string
