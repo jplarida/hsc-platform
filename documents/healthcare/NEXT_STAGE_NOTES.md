@@ -175,27 +175,28 @@ This document outlines the **next phase of documentation** - breaking down our h
 
 ### 4.1 CI/CD Pipeline Detailed Implementation
 **Source:** `CICD_PIPELINE.md`
+**Delivered:** `infrastructure/` — docs 01–04. See [`infrastructure/README.md`](infrastructure/README.md); note the unresolved ECS/Kubernetes fork in doc 03.
 
 **Granular Diagrams Needed:**
-- [ ] **Build Pipeline Specifications**
+- [x] **Build Pipeline Specifications**
   - GitHub Actions workflow definitions
   - Docker containerization strategies
   - Multi-stage build optimizations
   - Artifact storage and versioning
 
-- [ ] **Testing Automation Framework**
+- [x] **Testing Automation Framework**
   - Unit testing pipeline configuration
   - Integration testing environments
   - End-to-end testing orchestration
   - Performance testing automation
 
-- [ ] **Deployment Strategies**
+- [x] **Deployment Strategies**
   - Blue-green deployment procedures
   - Canary release implementation
   - Rollback automation and procedures
   - Environment promotion workflows
 
-- [ ] **Infrastructure as Code (IaC)**
+- [x] **Infrastructure as Code (IaC)**
   - Terraform/CloudFormation templates
   - Environment configuration management
   - Secret management and rotation
@@ -203,21 +204,22 @@ This document outlines the **next phase of documentation** - breaking down our h
 
 ### 4.2 Security Implementation Details
 **Source:** `SECURITY_ARCHITECTURE.md`
+**Delivered:** `infrastructure/` — docs 05–07. See [`infrastructure/README.md`](infrastructure/README.md).
 
 **Detailed Security Diagrams:**
-- [ ] **Authentication Sequence Diagrams**
+- [x] **Authentication Sequence Diagrams**
   - Login flow with MFA
   - Password reset procedures
   - Account lockout and recovery
   - SSO integration workflows
 
-- [ ] **Data Encryption Implementation**
+- [x] **Data Encryption Implementation**
   - Encryption at rest configuration
   - Transit encryption (TLS/SSL) setup
   - Key management service integration
   - Data masking and tokenization
 
-- [ ] **Compliance Audit Procedures**
+- [x] **Compliance Audit Procedures**
   - HIPAA compliance validation workflows
   - SOC 2 audit preparation diagrams
   - Vulnerability scanning automation
