@@ -16,51 +16,52 @@ This document outlines the **next phase of documentation** - breaking down our h
 
 ### 1.1 Database Schema Deep Dive
 **Source:** `DATABASE_SCHEMA.md`
+**Delivered:** `database/` — see [`database/README.md`](database/README.md) for the index. Each doc lists its corrections to `DATABASE_SCHEMA.md`.
 
 **Granular Diagrams Needed:**
-- [ ] **Tenant Management ERD**
+- [x] **Tenant Management ERD**
   - Tenant configuration tables
   - Subscription and billing data model
   - Tenant-specific customization schema
   - Multi-tenancy isolation verification diagrams
 
-- [ ] **User & Authentication ERD** 
+- [x] **User & Authentication ERD** 
   - User profile and role management
   - Session and token management schema
   - SSO integration data models
   - MFA configuration and backup codes
 
-- [ ] **Core Business Entity ERDs (per industry)**
+- [x] **Core Business Entity ERDs (per industry)**
   - Healthcare: Patient records, appointments, procedures, insurance
   - Legal: Cases, clients, documents, time tracking, billing
   - Professional Services: Projects, clients, tasks, resources
 
-- [ ] **Audit & Compliance Schema**
+- [x] **Audit & Compliance Schema**
   - Audit trail table design
   - HIPAA logging requirements
   - Data retention and purging workflows
   - Compliance reporting data structure
 
-- [ ] **File & Document Management Schema**
+- [x] **File & Document Management Schema**
   - File metadata and versioning
   - Document tagging and categorization
   - Storage location tracking (S3, local, etc.)
   - File sharing and permission inheritance
 
 **Implementation Diagrams:**
-- [ ] **Database Indexing Strategy**
+- [x] **Database Indexing Strategy**
   - Performance-critical index definitions
   - Composite index recommendations
   - Query optimization patterns
   - Index maintenance procedures
 
-- [ ] **Data Migration Workflows**
+- [x] **Data Migration Workflows**
   - Legacy system data mapping
   - ETL process flow diagrams
   - Data validation and cleansing steps
   - Rollback procedures for failed migrations
 
-- [ ] **Database Scaling Architecture**
+- [x] **Database Scaling Architecture**
   - Read replica configuration
   - Sharding strategy implementation
   - Connection pooling and load balancing
