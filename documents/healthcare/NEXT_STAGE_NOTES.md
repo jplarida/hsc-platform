@@ -273,15 +273,16 @@ This document outlines the **next phase of documentation** - breaking down our h
 
 ### 6.1 Data Analytics & Business Intelligence
 **New Documentation Needed:**
+**Delivered:** `analytics/` — see [`analytics/README.md`](analytics/README.md). Design-ahead: the roadmap places this at months 13–24, and cross-tenant work depends on schema-driven de-identification that does not exist yet.
 
 **Detailed Specifications:**
-- [ ] **Data Warehouse Architecture**
+- [x] **Data Warehouse Architecture**
   - ETL pipeline design and implementation
   - Data lake structure and partitioning
   - Real-time analytics processing
   - Customer-facing analytics dashboards
 
-- [ ] **Machine Learning Integration**
+- [x] **Machine Learning Integration**
   - ML model training and deployment pipelines
   - Feature engineering and data preparation
   - Model monitoring and performance tracking
@@ -289,15 +290,16 @@ This document outlines the **next phase of documentation** - breaking down our h
 
 ### 6.2 Customer Experience Implementation
 **New Documentation Needed:**
+**Delivered:** `experience/` — see [`experience/README.md`](experience/README.md). Near-term per the roadmap (months 10–12).
 
 **Granular UX/UI Specifications:**
-- [ ] **User Journey Implementation**
+- [x] **User Journey Implementation**
   - Onboarding flow implementation details
   - Task-based workflow optimizations
   - Error state handling and recovery
   - Accessibility implementation (WCAG 2.1 AA)
 
-- [ ] **Customer Support Integration**
+- [x] **Customer Support Integration**
   - In-app help system implementation
   - Knowledge base search and indexing
   - Support ticket integration workflows
