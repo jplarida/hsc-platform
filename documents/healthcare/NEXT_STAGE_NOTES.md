@@ -305,6 +305,32 @@ This document outlines the **next phase of documentation** - breaking down our h
   - Support ticket integration workflows
   - Customer feedback collection systems
 
+### 6.3 Interoperability & Standards (HL7 / FHIR)
+**New Documentation Needed:**
+**Direction:** `interoperability/` — see [`interoperability/README.md`](interoperability/README.md).
+A FHIR *façade* is recommended over native FHIR storage. **Not approved, and gated on the vertical
+question** (`database/03` open question 5: clinical healthcare, or workplace health & safety?).
+If the vertical is health & safety, this section is closed and the healthcare catalogue is
+reconciled instead.
+
+**Detailed Specifications:**
+- [ ] **FHIR Façade Design**
+  - Resource mapping tables (patient→Patient, appointment→Appointment, procedure→Procedure, insurance_policy→Coverage, claim→Claim)
+  - FHIR version and profile selection (R4 + US Core is the conventional target)
+  - SMART on FHIR scope to platform permission mapping
+  - CapabilityStatement generation and conformance testing (Inferno / Touchstone)
+
+- [ ] **Terminology Service**
+  - Coded fields as {system, code, display} rather than bare strings — **act on this at the next Phase 1 revision regardless of FHIR**
+  - Code system storage, versioning and annual update handling (ICD-10-CM, CPT, SNOMED CT, LOINC)
+  - Validation on write; licensing review (AMA for CPT, SNOMED affiliate)
+
+- [ ] **HL7 v2 Ingestion**
+  - Message types in scope (ADT, ORU, ORM, SIU) and segment mappings
+  - Isolated MLLP listener writing through the platform API — never directly to the database
+  - Patient matching, duplicate detection and merge on inbound
+  - Original payload retention for provenance and re-translation
+
 ---
 
 ## Phase 7: Scalability & Performance Implementation
