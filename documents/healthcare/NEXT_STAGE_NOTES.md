@@ -364,15 +364,16 @@ reconciled instead.
 
 ### 8.1 Third-Party Integration Framework
 **New Documentation Needed:**
+**Delivered:** `partners/` — see [`partners/README.md`](partners/README.md). Three documents. Roughly half the sub-items had a home already (`api/05` for docs generation, `api/01` for key management, `infrastructure/02` for test automation, `database/01` for billing), so those are pointed at rather than restated. The genuinely new work is the OAuth authorization server, which `api/01` and `api/04` each defer to this phase in their own open questions.
 
 **Detailed Integration Specifications:**
-- [ ] **API Partner Program Implementation**
+- [x] **API Partner Program Implementation**
   - Partner API documentation generation
   - API key management and analytics
   - Partner portal development specifications
   - Revenue sharing and billing integration
 
-- [ ] **Marketplace Integration Development**
+- [x] **Marketplace Integration Development**
   - App marketplace architecture
   - Third-party app certification procedures
   - Sandboxing and security isolation
