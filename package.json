@@ -1,0 +1,27 @@
+{
+  "name": "hsc-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Health, Safety & Compliance Platform — database schema",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:create": "node scripts/db-create.mjs",
+    "db:migrate": "prisma migrate deploy",
+    "db:reset": "node scripts/db-create.mjs --drop && prisma migrate deploy",
+    "db:pull": "prisma db pull",
+    "db:generate": "prisma generate",
+    "db:verify": "node scripts/verify-schema.mjs",
+    "test:isolation": "node --test tests/"
+  },
+  "devDependencies": {
+    "prisma": "^6.1.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0",
+    "pg": "^8.13.1"
+  }
+}

@@ -1,0 +1,24 @@
+// The schema is SQL-first: prisma/migrations/*/migration.sql is the source of truth.
+//
+// This file holds only the datasource and generator. The model blocks below the
+// generator are produced by `npm run db:pull`, which introspects the live database
+// after migrations have been applied — they are generated output, not hand-authored.
+//
+// Why: the schema's security properties are overwhelmingly expressed in DDL that
+// Prisma's schema language cannot represent — row-level security policies, FORCE RLS,
+// role grants, plpgsql triggers, partitioned tables, partial indexes and CHECK
+// constraints. A Prisma-first workflow regenerates migrations from the model blocks
+// and would silently drop every one of them. See db/README.md.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generated models appear below after `npm run db:pull`. Do not hand-edit.
+// ─────────────────────────────────────────────────────────────────────────────
