@@ -143,20 +143,88 @@ export async function createRecord(pool, tenant, title = 'Untitled') {
   });
 }
 
-/** Remove everything a test run created. Financial FKs are RESTRICT by design, so order
- *  matters and tenants cannot simply be deleted — which is itself the behaviour
- *  database/01 intended. */
+/**
+ * Remove everything a test run created.
+ *
+ * OBSERVED on first execution: this originally failed with
+ *   update or delete on table "tenants" violates foreign key constraint
+ *   "data_audit_log_tenant_id_fkey"
+ * and the equivalent for tenant_users via data_audit_log.changed_by.
+ *
+ * That is the schema working as designed, not a bug. database/01 states that tenant
+ * offboarding soft-deletes via tenants.deleted_at rather than issuing a DELETE, precisely
+ * so audit and financial history survives. A hard delete is something production never
+ * does — the test fixture was asking for something the design forbids.
+ *
+ * Test teardown legitimately needs it, so audit rows are removed first, as the owner,
+ * with the immutability trigger disabled for the statement. That is the one place this
+ * is acceptable: a disposable dev database. It must never appear in application code,
+ * which is why it lives here and not behind a general-purpose helper.
+ */
 export async function cleanup(pool, tenantIds) {
   if (tenantIds.length === 0) return;
+  const AUDITED = ['records', 'tenant_users', 'files', 'record_links', 'user_roles',
+                   'sso_connections', 'integration_connections'];
+  const AUDIT_TRIGGER = {
+    records: 'records_audit_trigger',
+    tenant_users: 'tenant_users_audit_trigger',
+    files: 'files_audit_trigger',
+    record_links: 'record_links_audit_trigger',
+    user_roles: 'user_roles_audit_trigger',
+    sso_connections: 'sso_connections_audit_trigger',
+    integration_connections: 'integration_connections_audit_trigger',
+  };
+
   await asOwner(pool, async (c) => {
+    // Auditing is suppressed for the duration of teardown.
+    //
+    // OBSERVED across three iterations of this helper: deleting from an audited table
+    // fires create_audit_log() and writes *fresh* audit rows, so purging audit first
+    // leaves tenants blocked, and purging it last leaves tenant_users blocked by
+    // data_audit_log.changed_by. There is no ordering that works while the triggers are
+    // live — the audit trail is designed to make this data undeletable, and it succeeds.
+    //
+    // Suppressing the triggers is legitimate here and nowhere else: a disposable dev
+    // fixture. Production never hard-deletes a tenant; database/01 soft-deletes via
+    // tenants.deleted_at precisely so this history survives.
+    for (const t of AUDITED) {
+      await c.query(`ALTER TABLE ${t} DISABLE TRIGGER ${AUDIT_TRIGGER[t]}`);
+    }
+
     await c.query('DELETE FROM invoice_line_items WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM invoices WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM subscriptions WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM file_associations WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM files WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM record_links WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM records WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM record_type_definitions WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM user_roles WHERE user_id IN (SELECT user_id FROM tenant_users WHERE tenant_id = ANY($1))', [tenantIds]);
+
+    // Audit rows must go before tenant_users, because data_audit_log.changed_by is a
+    // foreign key to it — a user who has ever written anything cannot be deleted while
+    // their audit history exists. See the note in db/README.md: that FK contradicts
+    // user_audit_log.user_email being denormalised "so it survives user deletion", and
+    // is a genuine design question rather than a fixture problem.
+    await c.query('ALTER TABLE data_audit_log DISABLE TRIGGER data_audit_immutable');
+    await c.query('ALTER TABLE user_audit_log DISABLE TRIGGER user_audit_immutable');
+    await c.query('ALTER TABLE system_audit_log DISABLE TRIGGER system_audit_immutable');
+    try {
+      await c.query('DELETE FROM data_audit_log WHERE tenant_id = ANY($1)', [tenantIds]);
+      await c.query('DELETE FROM user_audit_log WHERE tenant_id = ANY($1)', [tenantIds]);
+      await c.query('DELETE FROM system_audit_log WHERE tenant_id = ANY($1)', [tenantIds]);
+    } finally {
+      await c.query('ALTER TABLE data_audit_log ENABLE TRIGGER data_audit_immutable');
+      await c.query('ALTER TABLE user_audit_log ENABLE TRIGGER user_audit_immutable');
+      await c.query('ALTER TABLE system_audit_log ENABLE TRIGGER system_audit_immutable');
+    }
+
     await c.query('DELETE FROM tenant_users WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM roles WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM tenants WHERE tenant_id = ANY($1)', [tenantIds]);
+
+    for (const t of AUDITED) {
+      await c.query(`ALTER TABLE ${t} ENABLE TRIGGER ${AUDIT_TRIGGER[t]}`);
+    }
   });
 }

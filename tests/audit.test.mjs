@@ -37,12 +37,23 @@ const auditCount = (table, tenantId) =>
     return count;
   });
 
-const latestAudit = (table, tenantId) =>
+/**
+ * The most recent audit row for a table, optionally narrowed to one operation.
+ *
+ * The `operation` filter is not a convenience. OBSERVED on first execution: ordering by
+ * timestamp alone returned the INSERT row rather than the UPDATE that followed it in the
+ * same transaction, because NOW() is transaction-scoped and both rows carried an
+ * identical timestamp. Migration 0005 now writes clock_timestamp(), which fixes the
+ * ordering — but a test that depends on tie-breaking is fragile either way, so it asks
+ * for the row it actually means.
+ */
+const latestAudit = (table, tenantId, operation = null) =>
   asOwner(pool, async (c) => {
     const { rows } = await c.query(
       `SELECT * FROM data_audit_log
         WHERE table_name = $1 AND tenant_id = $2
-        ORDER BY timestamp DESC LIMIT 1`, [table, tenantId]);
+          AND ($3::text IS NULL OR operation = $3)
+        ORDER BY timestamp DESC LIMIT 1`, [table, tenantId, operation]);
     return rows[0];
   });
 
@@ -95,7 +106,7 @@ describe('audit completeness', () => {
     await withTenantContext(pool, { tenantId: t.id }, (c) => c.query(
       `UPDATE records SET title = 'after' WHERE record_id = $1`, [recId]));
 
-    const row = await latestAudit('records', t.id);
+    const row = await latestAudit('records', t.id, 'UPDATE');
     assert.equal(row.operation, 'UPDATE');
     assert.ok(row.changed_fields.includes('title'));
     // version and updated_at also change, via the bump_record_version trigger.
@@ -118,7 +129,7 @@ describe('audit masking', () => {
         [userId]);
     });
 
-    const row = await latestAudit('tenant_users', t.id);
+    const row = await latestAudit('tenant_users', t.id, 'UPDATE');
 
     // Without mask_sensitive() the audit log becomes a credential store that outlives
     // password rotation — every historical hash, retained for six years.

@@ -205,6 +205,22 @@ BEGIN
          WHERE v_new -> key IS DISTINCT FROM v_old -> key;
 
         -- A no-op save should not write an empty audit row.
+        --
+        -- OBSERVED (first execution): the guard above never fired for `records`. Two
+        -- triggers documented independently — bump_record_version() in database/03 and
+        -- this one in database/04 — interact. The BEFORE trigger sets updated_at = NOW()
+        -- and increments version on every UPDATE, so by the time this AFTER trigger runs
+        -- those two columns have always changed and v_changed is never NULL.
+        --
+        -- Neither document is wrong on its own; the combination defeats the stated intent
+        -- and turns every touch of a record into an audit row. Mechanical columns are
+        -- therefore excluded when deciding whether anything actually happened. They are
+        -- still reported in changed_fields when a real change accompanies them.
+        IF v_changed IS NOT NULL
+           AND v_changed <@ ARRAY['updated_at', 'version', 'search_vector'] THEN
+            RETURN NEW;
+        END IF;
+
         IF v_changed IS NULL THEN
             RETURN NEW;
         END IF;
@@ -227,7 +243,13 @@ BEGIN
         current_actor_id(),
         current_app_id(),
         current_installation_id(),
-        NOW()
+        -- clock_timestamp(), not NOW(). OBSERVED on first execution: NOW() is the
+        -- transaction start time, so every audit row written inside one transaction
+        -- carried an identical timestamp. With no sequence column either, the order of
+        -- two changes made in the same transaction was unrecoverable — "what happened
+        -- first?" is a question an audit trail has to be able to answer, and this one
+        -- could not. clock_timestamp() advances per statement.
+        clock_timestamp()
     );
 
     RETURN COALESCE(NEW, OLD);

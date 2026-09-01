@@ -3,75 +3,52 @@
 The schema is **SQL-first**. `prisma/migrations/*/migration.sql` is the source of truth;
 Prisma generates the typed client from the live database and does not own the schema.
 
-## LIMITATIONS — read this first
+## Status
 
-**Nothing in this directory has ever been executed.** As of the last commit, no migration
-has been applied to any database and no test has passed. PostgreSQL 17.6 is installed and
-running locally, but `pg_hba.conf` requires `scram-sha-256` and no credential is available
-to the tooling, so the whole stack below is verified only by static analysis.
-
-What that means concretely:
-
-| Artefact | Verified by | Not verified |
-|---|---|---|
-| 8 migrations, 79 tables | `npm run lint:migrations` — forward references, `$$` balance, RLS checklist, asymmetric policies | That PostgreSQL accepts a single statement |
-| ~45 tests across 4 files | `node --check`, and all four reaching the credential check | That any assertion is correct |
-| 9 documented defects | Reasoning against the PostgreSQL manual | Two were observed via the lint (#8, #9); the rest are reasoning |
-
-### To resume
+**The schema runs and the tests pass.** All eight migrations apply cleanly from an empty
+database, and the 44 assertions in `tests/` pass — verified twice from a freshly recreated
+volume, serially.
 
 ```
-psql -U postgres -c "CREATE ROLE hsc_owner LOGIN CREATEROLE PASSWORD 'devpassword'; CREATE DATABASE hsc_dev OWNER hsc_owner;"
-printf 'DATABASE_URL="postgresql://hsc_owner:devpassword@localhost:5432/hsc_dev?schema=public"\n' > .env
-npm run db:migrate && npm test
+npm run db:up        # docker compose up -d
+npm run db:migrate   # prisma migrate deploy
+npm test             # 44 pass, 0 fail
 ```
 
-Expect failures on the first run. Work through them in this order — a migration failure
-invalidates every test downstream of it, so there is no point reading test output until
-`db:migrate` is clean.
+The stack is Docker Compose: PostgreSQL 17.6 on **5433** (5432 is taken by a native
+install on this machine) plus the two Redis instances `performance/01` requires, all bound
+to `127.0.0.1` only. Container credentials are development-only and deliberately in the
+compose file; nothing in it is a real secret.
 
-### Known-suspect assertions
-
-Three of the original five have been resolved. What remains:
-
-1. **`even the owner cannot UPDATE an audit row`** (`audit`). Asserts the statement-level
-   trigger fires for the table owner. Triggers are not role-aware, so this should hold —
-   but if the owner does bypass it, audit immutability is weaker than `database/04` claims
-   and the design needs rethinking, not the test.
-2. **The `audit_append` policy** (`0005`). Resolves the `SECURITY DEFINER` / `FORCE RLS`
-   deadlock (defect 3 below) by granting the migration owner `INSERT` on `data_audit_log`.
-   If the deadlock analysis is wrong, this policy is unnecessary — harmless, but it should
-   then be removed rather than left as cargo.
-
-**Resolved — and one was a real bug.**
-
-- **The `WITH CHECK` question turned out to be a genuine escalation, not a test bug.**
-  PostgreSQL reuses `USING` for new rows when `WITH CHECK` is omitted, which is harmless
-  for the 64 symmetric policies. But the `roles` policy is deliberately asymmetric —
-  `USING` permits `tenant_id IS NULL` so system role templates are readable by every
-  tenant. Without an explicit `WITH CHECK`, that read permissiveness applied to writes,
-  and **any `app_user` could have inserted a platform-wide system role template**. Fixed
-  in `0003`, covered by three tests (cannot forge one, can still read them, can still
-  create an ordinary tenant role), and `lint:migrations` now flags the shape so it cannot
-  recur. `roles` was the only affected policy: the partner policies are all `FOR SELECT`,
-  and `app_scope_grants`' subquery is itself RLS-filtered.
-- **Exact SQLSTATE assertions replaced.** `42501` was a guess. The partner tests now
-  assert a privilege *refusal* — the property that matters — rather than one specific code.
-- **Partition coverage now tested.** Two tests assert at least 16 monthly partitions exist,
-  that the current month is among them, and that current-month rows are not silently
-  landing in `DEFAULT`.
-
-### Also outstanding
+### Still outstanding
 
 - **No seed data.** `permissions` and `app_scopes` are seeded by migrations, but there are
   no `plans`, no system `roles`, and no dev tenant — the database comes up empty and is
   not manually explorable. The `partner_sandbox` plan row that `partners/01` requires is
-  among the missing.
-- **`prisma db pull` has never run**, so `schema.prisma` has no model blocks and no
-  Prisma client has been generated. Nothing can query this schema through Prisma yet.
+  among the missing. Tests build their own fixtures, so this blocks exploration, not CI.
+- **`prisma db pull` has not been run**, so `schema.prisma` still has no model blocks and
+  no typed client exists. This is the next hard blocker for any application code.
 - **The `deepmerge-ts` override** (`package.json`) forces a transitive dependency past a
-  major version. `prisma validate` passes, but config-loading paths not exercised by that
-  command are untested. First thing to suspect if Prisma misbehaves around config.
+  major version. `prisma validate` and eight migrations pass through it, but config paths
+  those do not exercise remain untested.
+- **`data_audit_log.changed_by` is an open design question** — see defect 13 below. Not a
+  bug to fix blindly; it needs a decision.
+
+### The suite must run serially
+
+`npm test` passes `--test-concurrency=1`. The four files share one database and teardown
+toggles triggers on shared tables; run in parallel they race, and the symptom is a
+*shifting* set of failures rather than a consistent one. Two debugging rounds were spent
+on noise from this before it was diagnosed.
+
+### What tests cannot cover
+
+Teardown suppresses the audit triggers to delete its fixtures. It has to: with the
+triggers live there is **no ordering that works**, because deleting from an audited table
+writes fresh audit rows, and `data_audit_log` holds foreign keys to both `tenants` and
+`tenant_users`. That is the design succeeding, not failing — production never hard-deletes
+a tenant (`database/01` soft-deletes via `deleted_at`). It does mean the delete path is
+exercised only with auditing off, so audit-on-delete behaviour is untested.
 
 
 ## Why not Prisma-first
@@ -137,15 +114,27 @@ reverted at `COMMIT`, which is what makes pooling safe.
 ## Usage
 
 ```bash
-cp .env.example .env          # fill in PGSUPERPASS and pick a password for the owner role
 npm install
-npm run db:create             # create database + owner role
-npm run db:migrate            # prisma migrate deploy
-npm run db:pull               # introspect into schema.prisma
-npm run db:generate           # generate the client
-npm run lint:migrations       # static checks, no database needed
-npm test                      # the suite below, needs a migrated database
+cp .env.example .env        # or write the compose values, see below
+npm run db:up               # postgres + both redis instances
+npm run db:migrate          # prisma migrate deploy
+npm test                    # 44 assertions, serial
+
+npm run lint:migrations     # static checks, no database needed
+npm run db:pull             # introspect into schema.prisma (not yet run)
+npm run db:nuke             # destroy volumes and start clean
 ```
+
+For the compose stack, `.env` wants:
+
+```
+DATABASE_URL="postgresql://hsc_owner:hsc_dev_password@localhost:5433/hsc_dev?schema=public"
+REDIS_CACHE_URL="redis://localhost:6379"
+REDIS_STATE_URL="redis://localhost:6381"
+```
+
+`db:create:native` is the alternative path for a natively-installed PostgreSQL rather
+than the container; it needs a superuser password in `PGSUPERPASS`.
 
 `npm run db:reset` drops and recreates. It refuses to run against a database whose name
 does not contain `dev` or `test`.
@@ -220,8 +209,35 @@ rediscovered, and so they can be confirmed once the schema is applied:
    platform-wide system role. The only asymmetric policy of the 65. Found while resolving
    a test assertion flagged as suspect.
 
-Items 1–4, 8 and 9 are new; 5–7 are corrections to documented claims. Only 8 and 9 were
-observed rather than reasoned — both by the lint.
+10. **The no-op audit guard was dead code.** `database/04`'s trigger skips writing an
+    audit row when nothing changed; `database/03`'s `bump_record_version()` fires BEFORE
+    UPDATE and always sets `updated_at` and `version`. Neither document is wrong alone —
+    together the guard could never fire, and every touch of a record wrote an audit row.
+    Mechanical columns are now excluded from the comparison.
+11. **Audit rows written in one transaction were unorderable.** `NOW()` is transaction
+    start time, so every row from a single transaction carried an identical timestamp,
+    and there is no sequence column. "Which change came first?" was unanswerable — for an
+    audit trail, a real gap. The trigger now writes `clock_timestamp()`.
+12. **Partitions do not inherit RLS.** All 51 audit partitions have `relrowsecurity =
+    false`. Not exploitable: `app_user` holds no grant on any partition and a direct read
+    is refused. But the only thing preventing a full cross-tenant audit leak is the
+    *absence of a grant*, so a test now asserts that grant surface — a future
+    `GRANT ... ON ALL TABLES IN SCHEMA public` would look harmless and open everything.
+13. **The audit trail makes tenants and users genuinely undeletable — and one FK
+    contradicts its own schema.** There is no ordering of deletes that succeeds while the
+    audit triggers are live, because deleting from an audited table writes fresh audit
+    rows. For `tenants` that is correct and intended (`database/01` soft-deletes via
+    `deleted_at`). For **users it is contradictory**: `data_audit_log.changed_by` is a
+    foreign key to `tenant_users`, so a user who has ever written anything cannot be
+    deleted for the six years their audit history is retained — while
+    `user_audit_log.user_email` is denormalised specifically "so it survives user
+    deletion". Both cannot be intended. **Left as-is pending a decision**, because it
+    interacts with GDPR erasure, which `database/04` resolves by anonymising rather than
+    deleting. The equivalent FK on `app_id` was dropped for exactly this reason.
+
+Items 1–4, 8 and 9 are new; 5–7 are corrections to documented claims; 10–13 were found by
+executing the schema. Defects 8–13 were observed. Defects 1–7 were reasoned from the
+manual, and 1–4 were confirmed correct when the migrations applied first try.
 
 ## Amendments folded in
 

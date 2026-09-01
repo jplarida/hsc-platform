@@ -15,12 +15,18 @@ after(async () => { await pool.end(); });
 
 describe('schema invariants', () => {
   test('every table with tenant_id has RLS enabled AND forced', async () => {
+    // Partitions are excluded. OBSERVED on first execution: a partition does not inherit
+    // relrowsecurity from its parent, so all 51 audit partitions failed this check.
+    // That is not a hole — RLS is enforced when the parent is queried, and app_user holds
+    // no grant on any partition, so a direct read is refused outright. The next test
+    // asserts that grant surface, which is the property that actually matters.
     const { rows } = await asOwner(pool, (c) => c.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'public'
          AND c.relkind = 'r'
+         AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid)
          AND EXISTS (SELECT 1 FROM information_schema.columns
                       WHERE table_schema = 'public'
                         AND table_name = c.relname
@@ -37,6 +43,23 @@ describe('schema invariants', () => {
     // FORCE is what subjects the table owner to the policy. Without it, any connection
     // that happens to own the table silently bypasses tenant isolation (database/04).
     assert.deepEqual(notForced, [], `tables with RLS enabled but not FORCED: ${notForced}`);
+  });
+
+  test('app_user holds no direct grant on any audit partition', async () => {
+    // This is what makes the partition exclusion above safe. Partitions carry no RLS of
+    // their own, so a direct SELECT would bypass tenant isolation entirely — the only
+    // thing preventing it is the absence of a grant. A future migration doing
+    // GRANT ... ON ALL TABLES IN SCHEMA public would silently open every tenant's audit
+    // history to every other, which is exactly the kind of change that looks harmless.
+    const { rows } = await asOwner(pool, (c) => c.query(`
+      SELECT g.table_name, g.privilege_type
+        FROM information_schema.role_table_grants g
+        JOIN pg_class c ON c.relname = g.table_name
+        JOIN pg_inherits i ON i.inhrelid = c.oid
+       WHERE g.grantee IN ('app_user', 'partner_portal_user')`));
+
+    assert.deepEqual(rows, [],
+      `no partition may be directly grantable: ${JSON.stringify(rows)}`);
   });
 
   test('every table with RLS enabled has at least one policy', async () => {

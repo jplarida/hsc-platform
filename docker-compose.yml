@@ -1,0 +1,86 @@
+# Local development stack.
+#
+# Pinned to exact minor versions rather than :latest — a schema this dependent on
+# PostgreSQL specifics (RLS with FORCE, declarative partitioning, generated columns,
+# BYPASSRLS) should not silently move underneath the migrations.
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    container_name: hsc-postgres
+    environment:
+      POSTGRES_USER: hsc_owner
+      POSTGRES_PASSWORD: hsc_dev_password
+      POSTGRES_DB: hsc_dev
+      # Deterministic collation. Index ordering and the subdomain CHECK regex both
+      # depend on it, and a locale difference between dev and CI produces failures
+      # that look like data problems.
+      LANG: C
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      # 5433 on the host, deliberately: PostgreSQL 17.6 is already installed natively
+      # on 5432. Binding there would either fail or, worse, quietly connect the test
+      # suite to the wrong server.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - hsc-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hsc_owner -d hsc_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    command:
+      # Surface slow statements while developing; the lock-time budget in database/07
+      # needs something to measure against.
+      - "postgres"
+      - "-c"
+      - "log_min_duration_statement=200"
+
+  # performance/01 is emphatic that cache and state must NOT share an instance.
+  # Under memory pressure allkeys-lru evicts rate-limiter windows, idempotency keys and
+  # circuit-breaker state alongside ordinary cache entries, and nothing errors — the
+  # limit silently resets, a retried request creates a duplicate charge, the breaker
+  # forgets an open circuit. Two instances, two eviction policies.
+  redis-cache:
+    image: redis:7.4-alpine
+    container_name: hsc-redis-cache
+    ports:
+      - "127.0.0.1:6379:6379"
+    command:
+      - "redis-server"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "volatile-lru"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis-state:
+    image: redis:7.4-alpine
+    container_name: hsc-redis-state
+    ports:
+      # 6381, not the conventional 6380: another stack on this machine already binds
+      # 6380. Kept explicit rather than left to Docker to assign, so the port is stable
+      # across restarts and can be written into .env.
+      - "127.0.0.1:6381:6379"
+    command:
+      - "redis-server"
+      - "--maxmemory"
+      - "256mb"
+      # noeviction: an OOM here must be a loud error, never a silent eviction of
+      # something that was load-bearing.
+      - "--maxmemory-policy"
+      - "noeviction"
+      - "--appendonly"
+      - "yes"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  hsc-pgdata:
