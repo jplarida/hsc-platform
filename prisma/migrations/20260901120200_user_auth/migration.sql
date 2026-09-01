@@ -357,6 +357,15 @@ CREATE UNIQUE INDEX uq_invitations_pending
 CREATE ROLE auth_service NOLOGIN;
 GRANT USAGE ON SCHEMA public TO auth_service;
 
+-- As with the roles in 0001: auth_service is a privilege set to be assumed, so something
+-- must be able to assume it. Without this the login path cannot reach auth_resolve_login()
+-- and authentication is impossible — the role exists but is unreachable.
+DO $$
+BEGIN
+    EXECUTE format('GRANT auth_service TO %I', current_user);
+END
+$$;
+
 CREATE OR REPLACE FUNCTION auth_resolve_login(p_subdomain TEXT, p_email TEXT)
 RETURNS TABLE (
     user_id       UUID,

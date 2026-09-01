@@ -14,8 +14,8 @@
     "db:reset": "node scripts/db-create.mjs --drop && prisma migrate deploy",
     "db:pull": "prisma db pull",
     "db:generate": "prisma generate",
-    "db:verify": "node scripts/verify-schema.mjs",
-    "test:isolation": "node --test tests/"
+    "lint:migrations": "node scripts/lint-migrations.mjs",
+    "test": "node --test \"tests/*.test.mjs\""
   },
   "devDependencies": {
     "prisma": "^6.1.0"

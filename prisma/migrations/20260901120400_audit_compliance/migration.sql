@@ -43,6 +43,14 @@ CREATE TABLE user_audit_log (
 
     -- AMENDMENT (partners/02): without these, an app-authenticated action has a null
     -- actor and no way to identify which of a tenant's installed apps performed it.
+    --
+    -- DIVERGENCE from partners/02, which writes these as
+    --   app_id UUID REFERENCES partner_apps(app_id)
+    -- Deliberately no foreign key here. Audit rows are retained for six years under
+    -- HIPAA 164.316(b)(2) and must outlive the partner they refer to; an FK would either
+    -- block a partner's removal forever or, with a cascade, delete the evidence that the
+    -- app ever touched the data. The id is recorded as an opaque value, exactly as
+    -- user_email is denormalised onto user_audit_log so it survives user deletion.
     app_id          UUID,
     installation_id UUID,
 

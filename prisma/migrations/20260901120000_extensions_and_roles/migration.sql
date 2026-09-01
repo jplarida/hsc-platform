@@ -66,6 +66,24 @@ $$;
 -- the tenant tables the moment a later migration adds one.
 GRANT USAGE ON SCHEMA public TO app_user, app_platform, partner_portal_user;
 
+-- app_user, app_platform and partner_portal_user are NOLOGIN: they are privilege sets to
+-- be assumed, not accounts to connect as. Something must therefore be able to assume
+-- them, or they are unreachable — the application's login role SET ROLEs to app_user per
+-- request, and the test suite does the same to exercise each boundary.
+--
+-- (The migration owner is the connecting role and is not in that set. auth_service is
+-- created in migration 0003 and granted there, for the same reason.)
+--
+-- Membership is granted to the migration owner. Role *attributes* are never inherited
+-- through membership in PostgreSQL — BYPASSRLS, LOGIN, CREATEDB and the rest apply only
+-- to the role actually in effect — so this does not quietly hand the owner app_platform's
+-- RLS bypass. It only permits SET ROLE.
+DO $$
+BEGIN
+    EXECUTE format('GRANT app_user, app_platform, partner_portal_user TO %I', current_user);
+END
+$$;
+
 -- Nothing is granted by default to PUBLIC on new objects.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC;
 

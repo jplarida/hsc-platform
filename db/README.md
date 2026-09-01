@@ -3,6 +3,69 @@
 The schema is **SQL-first**. `prisma/migrations/*/migration.sql` is the source of truth;
 Prisma generates the typed client from the live database and does not own the schema.
 
+## LIMITATIONS — read this first
+
+**Nothing in this directory has ever been executed.** As of the last commit, no migration
+has been applied to any database and no test has passed. PostgreSQL 17.6 is installed and
+running locally, but `pg_hba.conf` requires `scram-sha-256` and no credential is available
+to the tooling, so the whole stack below is verified only by static analysis.
+
+What that means concretely:
+
+| Artefact | Verified by | Not verified |
+|---|---|---|
+| 8 migrations, 79 tables | `npm run lint:migrations` — forward references, `$$` balance, RLS checklist | That PostgreSQL accepts a single statement |
+| 38 tests across 4 files | `node --check`, and all four reaching the credential check | That any assertion is correct |
+| 8 documented defects | Reasoning against the PostgreSQL manual | Only #8 was observed (by the lint) |
+
+### To resume
+
+```
+psql -U postgres -c "CREATE ROLE hsc_owner LOGIN CREATEROLE PASSWORD 'devpassword'; CREATE DATABASE hsc_dev OWNER hsc_owner;"
+printf 'DATABASE_URL="postgresql://hsc_owner:devpassword@localhost:5432/hsc_dev?schema=public"\n' > .env
+npm run db:migrate && npm test
+```
+
+Expect failures on the first run. Work through them in this order — a migration failure
+invalidates every test downstream of it, so there is no point reading test output until
+`db:migrate` is clean.
+
+### Known-suspect assertions
+
+These were written from the manual rather than from observation, and are the most likely
+to be wrong in the test rather than in the schema:
+
+1. **`a write cannot forge another tenant_id`** (`tenant-isolation`). Relies on a
+   `FOR ALL` policy applying its `USING` expression as `WITH CHECK` when the latter is
+   omitted. Believed correct, but if this fails the fix is probably an explicit
+   `WITH CHECK` on every policy — a schema change, not a test change, and a real gap if so.
+2. **`42501` error codes** (`partner-isolation`). A missing table privilege may surface
+   with a different SQLSTATE than the one asserted. If these fail, check the actual code
+   before assuming the grant is wrong.
+3. **`even the owner cannot UPDATE an audit row`** (`audit`). Asserts the statement-level
+   trigger fires for the table owner. If the owner turns out to bypass it, audit
+   immutability is weaker than `database/04` claims and needs rethinking.
+4. **The `audit_append` policy** (`0005`). Resolves the `SECURITY DEFINER` / `FORCE RLS`
+   deadlock (defect 3 below) by granting the migration owner `INSERT` on `data_audit_log`.
+   If the deadlock analysis is wrong, this policy is unnecessary — harmless, but it should
+   then be removed rather than left as cargo.
+5. **Partition coverage.** `0005` creates partitions from three months back to thirteen
+   months forward. Tests inserting audit rows outside that window land in the DEFAULT
+   partition and still pass, so the window itself is untested.
+
+### Also outstanding
+
+- **No seed data.** `permissions` and `app_scopes` are seeded by migrations, but there are
+  no `plans`, no system `roles`, and no dev tenant — the database comes up empty and is
+  not manually explorable. The `partner_sandbox` plan row that `partners/01` requires is
+  among the missing.
+- **`prisma db pull` has never run**, so `schema.prisma` has no model blocks and no
+  Prisma client has been generated. Nothing can query this schema through Prisma yet.
+- **The `deepmerge-ts` override** (`package.json`) forces a transitive dependency past a
+  major version. `prisma validate` passes, but config-loading paths not exercised by that
+  command are untested. First thing to suspect if Prisma misbehaves around config.
+
+
 ## Why not Prisma-first
 
 Counted across `documents/healthcare/database/`, `api/` and `partners/`, the schema uses:
@@ -72,16 +135,49 @@ npm run db:create             # create database + owner role
 npm run db:migrate            # prisma migrate deploy
 npm run db:pull               # introspect into schema.prisma
 npm run db:generate           # generate the client
-node scripts/lint-migrations.mjs
+npm run lint:migrations       # static checks, no database needed
+npm test                      # the suite below, needs a migrated database
 ```
 
 `npm run db:reset` drops and recreates. It refuses to run against a database whose name
 does not contain `dev` or `test`.
 
-## Defects found by executing the documented DDL
+## Tests
+
+`tests/` asserts the boundaries the schema exists to enforce. They test the **database**,
+not the application — there is no application yet. `infrastructure/02` writes the same
+tests against a Prisma `withTenantContext` helper; these use `pg` directly, which is what
+that helper would wrap.
+
+| File | Asserts |
+|---|---|
+| `schema-invariants.test.mjs` | Catalogue-level: every `tenant_id` table has RLS enabled *and* forced, every RLS table has a policy, `partner_portal_user` holds no grant on tenant data, audit tables are append-only and partitioned with a composite PK |
+| `tenant-isolation.test.mjs` | Cross-tenant reads and counts, forged `tenant_id` on write, cross-tenant links, the pooled-connection GUC leak, fail-closed with no context |
+| `audit.test.mjs` | Trigger fires on `records`, `tenant_users` and `files` (fault 1), no-op updates write nothing, credentials masked, immutability under both `app_user` and the owner, actor attribution including `app_id` |
+| `partner-isolation.test.mjs` | Partner axis: own apps only, own installs only, own usage only, and no privilege at all on tenant tables |
+
+Three of these are regression tests for defects the documents recorded but nothing had
+ever executed:
+
+- **`writing tenant_users produces an audit row`** and **`writing files produces an audit
+  row`** — fault 1. Before the `TG_ARGV[0]` fix both tables were unwritable, failing with
+  `record "new" has no field "record_id"`.
+- **`a write with no request context does not abort`** — fault 2. `current_setting`
+  without `missing_ok` aborted every background job, migration and psql write.
+- **`tenant context does not leak across a pooled connection`** uses a pool of exactly
+  one, because with a normal pool the two requests probably land on different connections
+  and the test passes while the bug is present.
+
+The catalogue tests in `schema-invariants` are the ones that earn their keep over time:
+they catch a *future* migration that adds a tenant table and forgets its policy, which is
+otherwise found in production by the wrong person.
+
+## Defects found while extracting the documented DDL
 
 The specification documents were written against SQL that had never been run. These are
-the failures that only appear on execution, recorded so they are not rediscovered:
+failures that would only appear on execution — found by reading the DDL against the
+PostgreSQL manual, **not** by running it (see LIMITATIONS above). Recorded so they are not
+rediscovered, and so they can be confirmed once the schema is applied:
 
 1. **`to_tsvector('english', …)` in a generated column is rejected.** The two-argument
    text form is `STABLE`; a generation expression must be `IMMUTABLE`. Needs
