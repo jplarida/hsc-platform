@@ -76,6 +76,30 @@ for (const { name, sql } of files) {
     // conservative: skip, enum usage is validated by the database itself
   }
 
+  // Asymmetric FOR ALL policies without an explicit WITH CHECK.
+  //
+  // PostgreSQL reuses the USING expression for new rows when WITH CHECK is omitted. That
+  // is harmless when USING is a plain equality, and an escalation when USING is
+  // deliberately *permissive* for reads: the roles policy allows tenant_id IS NULL so
+  // system templates are readable by everyone, and without WITH CHECK any app_user could
+  // have inserted one. Flag the shape rather than trusting review to catch it again.
+  // Match the whole statement up to its terminating semicolon, then inspect it. An
+  // earlier version tried to capture USING(...) and an optional trailing WITH CHECK in
+  // one pattern; the lazy group backtracked past a WITH CHECK that was present and it
+  // reported a false positive on the very policy it was written to protect.
+  for (const m of s.matchAll(/CREATE\s+POLICY\s+(\w+)\s+ON\s+(\w+)\s+FOR\s+ALL([\s\S]*?);/gi)) {
+    const [, policy, table, body] = m;
+    const withCheck = /WITH\s+CHECK/i.test(body);
+    const usingExpr = (body.match(/USING\s*\(([\s\S]*)/i) || [, ''])[1];
+    const permissive = /\bIS\s+NULL\b|\bOR\b/i.test(usingExpr);
+    if (permissive && !withCheck) {
+      problems.push(
+        `${name}: policy ${policy} on ${table} is FOR ALL with a permissive USING ` +
+        `(contains OR / IS NULL) and no explicit WITH CHECK — reads and writes share the ` +
+        `same predicate, so read permissiveness becomes write permissiveness`);
+    }
+  }
+
   // Balanced dollar-quoting: an unclosed $$ silently swallows the rest of the file.
   const dollars = (sql.match(/\$\$/g) || []).length;
   if (dollars % 2 !== 0) problems.push(`${name}: unbalanced $$ quoting (${dollars})`);

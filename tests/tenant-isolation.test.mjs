@@ -63,8 +63,9 @@ describe('tenant isolation', () => {
   });
 
   test('a write cannot forge another tenant_id', async () => {
-    // The WITH CHECK half of the policy. Without it a tenant could read only its own
-    // rows but write rows belonging to anyone.
+    // PostgreSQL uses the USING expression as WITH CHECK when the latter is omitted, so
+    // a symmetric policy blocks forged inserts without further ceremony. Asserted rather
+    // than assumed, because the whole write path depends on it.
     await assert.rejects(
       withTenantContext(pool, { tenantId: b.id }, (c) => c.query(
         `INSERT INTO records (tenant_id, record_type, title) VALUES ($1, 'note', 'forged')`,
@@ -72,6 +73,48 @@ describe('tenant isolation', () => {
       (err) => err.code === '42501' || /row-level security/i.test(err.message),
       'inserting a row for another tenant must be refused by RLS',
     );
+  });
+
+  test('a tenant cannot create a system role template', async () => {
+    // Regression for a real escalation. The roles policy is deliberately asymmetric —
+    // USING permits tenant_id IS NULL so system templates are readable by everyone. With
+    // no explicit WITH CHECK, that permissiveness would apply to writes too, letting any
+    // app_user insert a platform-wide role template visible to every tenant on the
+    // installation. The policy carries an explicit WITH CHECK to prevent exactly this.
+    await assert.rejects(
+      withTenantContext(pool, { tenantId: a.id }, (c) => c.query(
+        `INSERT INTO roles (tenant_id, code, name, is_system)
+         VALUES (NULL, 'forged_system_role', 'Forged', true)`)),
+      (err) => err.code === '42501' || /row-level security/i.test(err.message),
+      'a tenant must not be able to author a system role template',
+    );
+  });
+
+  test('a tenant can still read system role templates', async () => {
+    // The other half: the asymmetry exists for a reason, and the fix must not break it.
+    const code = `sys_${Date.now()}`;
+    await asOwner(pool, (c) => c.query(
+      `INSERT INTO roles (tenant_id, code, name, is_system) VALUES (NULL, $1, 'System', true)`,
+      [code]));
+
+    try {
+      await withTenantContext(pool, { tenantId: a.id }, async (c) => {
+        const { rows } = await c.query('SELECT 1 FROM roles WHERE code = $1', [code]);
+        assert.equal(rows.length, 1, 'system templates must remain readable by every tenant');
+      });
+    } finally {
+      await asOwner(pool, (c) => c.query('DELETE FROM roles WHERE code = $1', [code]));
+    }
+  });
+
+  test('a tenant can create its own role', async () => {
+    // And the fix must not block the legitimate case it sits next to.
+    await withTenantContext(pool, { tenantId: a.id }, async (c) => {
+      const { rows } = await c.query(
+        `INSERT INTO roles (tenant_id, code, name) VALUES ($1, 'own_role', 'Own')
+         RETURNING role_id`, [a.id]);
+      assert.equal(rows.length, 1);
+    });
   });
 
   test('cross-tenant record links are impossible', async () => {

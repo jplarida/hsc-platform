@@ -154,7 +154,9 @@ export async function cleanup(pool, tenantIds) {
     await c.query('DELETE FROM subscriptions WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM records WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM record_type_definitions WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM user_roles WHERE user_id IN (SELECT user_id FROM tenant_users WHERE tenant_id = ANY($1))', [tenantIds]);
     await c.query('DELETE FROM tenant_users WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM roles WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM tenants WHERE tenant_id = ANY($1)', [tenantIds]);
   });
 }

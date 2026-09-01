@@ -14,9 +14,9 @@ What that means concretely:
 
 | Artefact | Verified by | Not verified |
 |---|---|---|
-| 8 migrations, 79 tables | `npm run lint:migrations` — forward references, `$$` balance, RLS checklist | That PostgreSQL accepts a single statement |
-| 38 tests across 4 files | `node --check`, and all four reaching the credential check | That any assertion is correct |
-| 8 documented defects | Reasoning against the PostgreSQL manual | Only #8 was observed (by the lint) |
+| 8 migrations, 79 tables | `npm run lint:migrations` — forward references, `$$` balance, RLS checklist, asymmetric policies | That PostgreSQL accepts a single statement |
+| ~45 tests across 4 files | `node --check`, and all four reaching the credential check | That any assertion is correct |
+| 9 documented defects | Reasoning against the PostgreSQL manual | Two were observed via the lint (#8, #9); the rest are reasoning |
 
 ### To resume
 
@@ -32,26 +32,34 @@ invalidates every test downstream of it, so there is no point reading test outpu
 
 ### Known-suspect assertions
 
-These were written from the manual rather than from observation, and are the most likely
-to be wrong in the test rather than in the schema:
+Three of the original five have been resolved. What remains:
 
-1. **`a write cannot forge another tenant_id`** (`tenant-isolation`). Relies on a
-   `FOR ALL` policy applying its `USING` expression as `WITH CHECK` when the latter is
-   omitted. Believed correct, but if this fails the fix is probably an explicit
-   `WITH CHECK` on every policy — a schema change, not a test change, and a real gap if so.
-2. **`42501` error codes** (`partner-isolation`). A missing table privilege may surface
-   with a different SQLSTATE than the one asserted. If these fail, check the actual code
-   before assuming the grant is wrong.
-3. **`even the owner cannot UPDATE an audit row`** (`audit`). Asserts the statement-level
-   trigger fires for the table owner. If the owner turns out to bypass it, audit
-   immutability is weaker than `database/04` claims and needs rethinking.
-4. **The `audit_append` policy** (`0005`). Resolves the `SECURITY DEFINER` / `FORCE RLS`
+1. **`even the owner cannot UPDATE an audit row`** (`audit`). Asserts the statement-level
+   trigger fires for the table owner. Triggers are not role-aware, so this should hold —
+   but if the owner does bypass it, audit immutability is weaker than `database/04` claims
+   and the design needs rethinking, not the test.
+2. **The `audit_append` policy** (`0005`). Resolves the `SECURITY DEFINER` / `FORCE RLS`
    deadlock (defect 3 below) by granting the migration owner `INSERT` on `data_audit_log`.
    If the deadlock analysis is wrong, this policy is unnecessary — harmless, but it should
    then be removed rather than left as cargo.
-5. **Partition coverage.** `0005` creates partitions from three months back to thirteen
-   months forward. Tests inserting audit rows outside that window land in the DEFAULT
-   partition and still pass, so the window itself is untested.
+
+**Resolved — and one was a real bug.**
+
+- **The `WITH CHECK` question turned out to be a genuine escalation, not a test bug.**
+  PostgreSQL reuses `USING` for new rows when `WITH CHECK` is omitted, which is harmless
+  for the 64 symmetric policies. But the `roles` policy is deliberately asymmetric —
+  `USING` permits `tenant_id IS NULL` so system role templates are readable by every
+  tenant. Without an explicit `WITH CHECK`, that read permissiveness applied to writes,
+  and **any `app_user` could have inserted a platform-wide system role template**. Fixed
+  in `0003`, covered by three tests (cannot forge one, can still read them, can still
+  create an ordinary tenant role), and `lint:migrations` now flags the shape so it cannot
+  recur. `roles` was the only affected policy: the partner policies are all `FOR SELECT`,
+  and `app_scope_grants`' subquery is itself RLS-filtered.
+- **Exact SQLSTATE assertions replaced.** `42501` was a guess. The partner tests now
+  assert a privilege *refusal* — the property that matters — rather than one specific code.
+- **Partition coverage now tested.** Two tests assert at least 16 monthly partitions exist,
+  that the current month is among them, and that current-month rows are not silently
+  landing in `DEFAULT`.
 
 ### Also outstanding
 
@@ -206,8 +214,14 @@ rediscovered, and so they can be confirmed once the schema is applied:
 8. **`app_usage_daily` had no RLS** while `partner_portal_user` held `SELECT` on it —
    every partner could read every other partner's install counts and PHI read volumes.
    Caught by `lint-migrations.mjs`, not by reading.
+9. **The `roles` policy permitted tenant escalation.** `USING` allows `tenant_id IS NULL`
+   so system role templates are readable by all tenants; PostgreSQL reuses `USING` as
+   `WITH CHECK` when the latter is omitted, so any `app_user` could have *inserted* a
+   platform-wide system role. The only asymmetric policy of the 65. Found while resolving
+   a test assertion flagged as suspect.
 
-Items 1–4 and 8 are new; 5–7 are corrections to documented claims.
+Items 1–4, 8 and 9 are new; 5–7 are corrections to documented claims. Only 8 and 9 were
+observed rather than reasoned — both by the lint.
 
 ## Amendments folded in
 

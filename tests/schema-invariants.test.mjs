@@ -116,6 +116,45 @@ describe('schema invariants', () => {
     }
   });
 
+  test('audit partitions cover the current month and the months around it', async () => {
+    // Without this, every audit test still passes by landing rows in the DEFAULT
+    // partition — so the declared window would be entirely untested. Migration 0005
+    // creates three months back through thirteen forward.
+    for (const table of ['user_audit_log', 'data_audit_log', 'system_audit_log']) {
+      const { rows } = await asOwner(pool, (c) => c.query(`
+        SELECT child.relname
+          FROM pg_class parent
+          JOIN pg_inherits inh ON inh.inhparent = parent.oid
+          JOIN pg_class child ON child.oid = inh.inhrelid
+         WHERE parent.relname = $1
+           AND pg_get_expr(child.relpartbound, child.oid) <> 'DEFAULT'`, [table]));
+
+      const names = rows.map((r) => r.relname);
+      assert.ok(names.length >= 16,
+        `${table} should have at least 16 monthly partitions, found ${names.length}`);
+
+      // The current month must exist, or today's audit rows fall to DEFAULT.
+      const thisMonth = new Date();
+      const suffix = `${thisMonth.getUTCFullYear()}_${String(thisMonth.getUTCMonth() + 1).padStart(2, '0')}`;
+      assert.ok(names.includes(`${table}_${suffix}`),
+        `${table} is missing a partition for the current month (${suffix})`);
+    }
+  });
+
+  test('an audit row for the current month lands in a real partition, not DEFAULT', async () => {
+    // The behavioural half of the check above.
+    const { rows } = await asOwner(pool, (c) => c.query(`
+      SELECT c.relname
+        FROM system_audit_log s
+        JOIN pg_class c ON c.oid = s.tableoid
+       WHERE s.timestamp >= date_trunc('month', NOW())
+       LIMIT 1`));
+
+    if (rows.length === 0) return;   // nothing written yet this month; nothing to assert
+    assert.ok(!rows[0].relname.endsWith('_default'),
+      `current-month audit rows are falling into the DEFAULT partition (${rows[0].relname})`);
+  });
+
   test('every audit partition parent has a DEFAULT partition', async () => {
     // Without one, an insert whose timestamp falls outside every declared range fails
     // outright — taking the application down the first month the partition job is missed.

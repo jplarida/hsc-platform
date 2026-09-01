@@ -450,9 +450,20 @@ CREATE POLICY tenant_isolation ON user_verification_tokens FOR ALL TO app_user
 CREATE POLICY tenant_isolation ON user_invitations         FOR ALL TO app_user
     USING (tenant_id = current_tenant_id());
 
--- roles carries a nullable tenant_id: system templates must be visible to every tenant.
+-- roles carries a nullable tenant_id: system templates (tenant_id IS NULL) must be
+-- readable by every tenant.
+--
+-- The explicit WITH CHECK is load-bearing and must not be dropped. PostgreSQL uses the
+-- USING expression for new rows as well when WITH CHECK is omitted — so without this
+-- clause the read permissiveness would apply to writes, and any app_user could INSERT a
+-- role with tenant_id = NULL, creating a platform-wide system template visible to every
+-- tenant. That is a privilege escalation across the tenant boundary, out of a policy that
+-- looks correct at a glance.
+--
+-- Reads are permissive, writes are confined to the caller's own tenant.
 CREATE POLICY tenant_isolation ON roles FOR ALL TO app_user
-    USING (tenant_id IS NULL OR tenant_id = current_tenant_id());
+    USING      (tenant_id IS NULL OR tenant_id = current_tenant_id())
+    WITH CHECK (tenant_id = current_tenant_id());
 
 -- user_roles and user_permission_overrides have no tenant_id of their own; both are
 -- scoped through the user they attach to.
