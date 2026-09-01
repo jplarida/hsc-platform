@@ -192,12 +192,36 @@ DECLARE
     v_old       JSONB;
     v_row       JSONB;
     v_record_id UUID;
+    v_tenant_id UUID;
     v_changed   TEXT[];
 BEGIN
     v_new := to_jsonb(NEW);
     v_old := to_jsonb(OLD);
     v_row := COALESCE(v_new, v_old);
     v_record_id := (v_row ->> v_pk_column)::UUID;
+
+    -- Fault 5 (found by seeding, not by the tests): this originally read
+    -- COALESCE(NEW.tenant_id, OLD.tenant_id) directly. That is fault 1 again in a
+    -- different column — database/04 fixed the primary key by passing it as TG_ARGV[0]
+    -- and then went on referencing NEW.tenant_id, which does not exist on every audited
+    -- table. user_roles is keyed (user_id, role_id) and carries no tenant_id at all, so
+    -- every grant of a role to a user failed with
+    -- 'record "new" has no field "tenant_id"'. RBAC was unusable.
+    --
+    -- Reading it out of the jsonb copy tolerates its absence; the GUC supplies it for
+    -- tables scoped through a parent. Failing loudly beats writing an unattributable
+    -- audit row, so a null tenant raises rather than defaulting.
+    v_tenant_id := COALESCE(
+        NULLIF(v_row ->> 'tenant_id', '')::UUID,
+        current_tenant_id());
+
+    IF v_tenant_id IS NULL THEN
+        RAISE EXCEPTION
+            'Audit trigger on % cannot resolve a tenant: the row has no tenant_id and '
+            'no tenant context is set. Wrap the write in set_tenant_context().',
+            TG_TABLE_NAME
+            USING ERRCODE = 'raise_exception';
+    END IF;
 
     IF TG_OP = 'UPDATE' THEN
         SELECT array_agg(key) INTO v_changed
@@ -231,7 +255,7 @@ BEGIN
         old_values, new_values, changed_fields,
         changed_by, app_id, installation_id, timestamp
     ) VALUES (
-        COALESCE(NEW.tenant_id, OLD.tenant_id),
+        v_tenant_id,
         TG_TABLE_NAME,
         v_record_id,
         TG_OP,

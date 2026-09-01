@@ -13,11 +13,12 @@
     "db:down": "docker compose down",
     "db:nuke": "docker compose down -v && docker compose up -d",
     "db:migrate": "prisma migrate deploy",
-    "db:pull": "prisma db pull",
+    "db:pull": "node scripts/db-pull.mjs",
     "db:generate": "prisma generate",
     "lint:migrations": "node scripts/lint-migrations.mjs",
     "test": "node --test --test-concurrency=1 \"tests/*.test.mjs\"",
-    "db:create:native": "node scripts/db-create.mjs"
+    "db:create:native": "node scripts/db-create.mjs",
+    "db:seed": "node scripts/seed.mjs"
   },
   "devDependencies": {
     "prisma": "^6.1.0"
