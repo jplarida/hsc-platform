@@ -16,18 +16,29 @@
     "db:pull": "node scripts/db-pull.mjs",
     "db:generate": "prisma generate",
     "lint:migrations": "node scripts/lint-migrations.mjs",
-    "test": "node --test --test-concurrency=1 \"tests/*.test.mjs\"",
+    "test": "npm run build && node --test --test-concurrency=1 \"tests/*.test.mjs\"",
     "db:create:native": "node scripts/db-create.mjs",
-    "db:seed": "node scripts/seed.mjs"
+    "db:seed": "node scripts/seed.mjs",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js"
   },
   "devDependencies": {
-    "prisma": "^6.1.0"
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.4.0",
+    "@types/pg": "^8.23.1",
+    "prisma": "^6.1.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.2"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",
+    "express": "^5.2.1",
+    "jose": "^6.2.10",
     "pg": "^8.13.1"
   }
 }
