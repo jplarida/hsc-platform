@@ -38,6 +38,7 @@
   "dependencies": {
     "@prisma/client": "^6.1.0",
     "express": "^5.2.1",
+    "ioredis": "^6.0.0",
     "jose": "^6.2.10",
     "pg": "^8.13.1"
   }

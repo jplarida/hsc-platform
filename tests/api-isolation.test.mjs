@@ -17,6 +17,9 @@ process.env.JWT_SECRET ??= 'test-secret-at-least-32-bytes-long!!';
 const { createApp } = await import('../dist/app.js');
 const { signAccessToken, CLOCK_TOLERANCE_SECONDS } = await import('../dist/auth/token.js');
 const { closePool } = await import('../dist/db/context.js');
+// The pipeline now includes the session check and rate limiter, so this file opens
+// Redis connections whether it uses them or not. Unclosed, they keep the process alive.
+const { closeRedis, waitForReady } = await import('../dist/redis/client.js');
 
 let pool;
 let server;
@@ -46,6 +49,7 @@ async function get(path, { token, headers = {} } = {}) {
 
 before(async () => {
   pool = createPool();
+  await Promise.all([waitForReady('cache'), waitForReady('state')]);
   a = await seedTenant(pool);
   b = await seedTenant(pool);
   created.push(a.id, b.id);
@@ -59,7 +63,11 @@ before(async () => {
 });
 
 after(async () => {
+  // fetch keeps connections alive, and server.close() waits for them — without this
+  // the suite hangs on teardown once a second file has made requests.
+  server.closeAllConnections();
   await new Promise((r) => server.close(r));
+  await closeRedis();
   await closePool();
   await cleanup(pool, created);
   await pool.end();

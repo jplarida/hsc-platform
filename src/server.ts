@@ -6,8 +6,14 @@
 
 import { createApp } from './app.js';
 import { closePool } from './db/context.js';
+import { closeRedis, waitForReady } from './redis/client.js';
 
 const port = Number(process.env['PORT'] ?? 3001);
+
+// Warm the connections before accepting traffic. Not required for correctness — every
+// consumer falls through — but a limiter that answers indeterminate for the first
+// requests after a deploy fails open exactly when a restart storm makes that worst.
+await Promise.all([waitForReady('cache'), waitForReady('state')]);
 
 const server = createApp().listen(port, () => {
   console.log(`hsc-platform api listening on :${port}`);
@@ -20,6 +26,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`${signal} received, draining`);
   server.close(async () => {
     await closePool();
+    await closeRedis();
     process.exit(0);
   });
   // Bounded: a hung connection must not keep the process alive indefinitely.

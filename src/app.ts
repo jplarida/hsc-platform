@@ -11,9 +11,11 @@ import {
   requestContext,
   securityHeaders,
   authenticate,
+  checkSession,
   bindTenant,
   errorHandler,
 } from './middleware/stack.js';
+import { rateLimit } from './middleware/rateLimit.js';
 import { recordsRouter } from './routes/records.js';
 
 export function createApp(): Express {
@@ -37,9 +39,10 @@ export function createApp(): Express {
     res.json({ status: 'ok' });
   });
 
-  // 6 — authentication, 8 — tenant binding. Nothing below this line runs without a
-  // verified context.
-  app.use('/v1', authenticate, bindTenant);
+  // 6 authentication, 7 session check, 8 tenant binding, 9 rate limit. The order is
+  // api/06's and is load-bearing: the session check needs sid from verified claims, and
+  // the limiter needs the tenant to resolve its plan.
+  app.use('/v1', authenticate, checkSession, bindTenant, rateLimit());
   app.use('/v1/records', recordsRouter);
 
   // 17 — error handler, registered last so it wraps everything above.

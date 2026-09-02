@@ -1,10 +1,9 @@
 /**
  * The request pipeline, in the order `api/06_MIDDLEWARE_ARCHITECTURE.md` specifies.
  *
- * Slice one implements stages 1, 2, 6, 8, 10, 13, 16 and 17. Rate limiting (9),
- * validation (11), idempotency (12), PHI access logging (14) and response caching (15)
- * are deliberately absent — each needs Redis wiring and its own pass, and bundling them
- * would bury the part that matters most.
+ * Implemented: stages 1, 2, 4, 6, 7, 8, 9, 10, 13 and 17.
+ * Still absent: validation (11), idempotency (12), PHI access logging (14) and response
+ * caching (15). Each needs its own pass.
  *
  * THE ORDERING IS THE SECURITY PROPERTY. `API_ARCHITECTURE.md` places tenant resolution
  * at stage 2 and authentication at stage 3. That inversion is correction 1 of `api/01`
@@ -19,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { ApiError, errorBody } from '../http/errors.js';
 import { deriveContext, type VerifiedTenantContext } from '../db/context.js';
 import { verifyAccessToken } from '../auth/token.js';
+import { isSessionLive } from '../services/sessions.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -28,6 +28,8 @@ declare global {
       /** Set only by `authenticate`, only from verified claims. */
       ctx?: VerifiedTenantContext;
       permissions?: readonly string[];
+      /** From the token’s sid claim. Absent for API keys and app tokens. */
+      sessionId?: string | undefined;
     }
   }
 }
@@ -79,6 +81,7 @@ export async function authenticate(
       role: 'app_user',
     });
     req.permissions = claims.permissions;
+    req.sessionId = claims.sessionId ?? undefined;
     next();
   } catch (err) {
     next(err);
@@ -151,4 +154,45 @@ export function errorHandler(
   }
 
   res.status(apiErr.status).json(errorBody(apiErr, req.requestId));
+}
+
+/**
+ * Stage 7 — session check.
+ *
+ * After authentication, because it needs `session_id` from the verified claims. Before
+ * tenant binding, per `api/06`'s stage order.
+ *
+ * A token whose session has been revoked is refused here. Without this stage, logout,
+ * password change, admin revocation and refresh-token reuse detection all write
+ * `sessions.revoked_at` and none of them take effect until the access token expires.
+ *
+ * A token carrying no `sid` is allowed through: API-key and app-token paths have no user
+ * session, and rejecting them here would break the machine-to-machine routes entirely.
+ * Their revocation lives in `api_keys.revoked_at` and `app_tokens.revoked_at`.
+ */
+export async function checkSession(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const ctx = req.ctx;
+    if (!ctx) throw new ApiError('MISSING_AUTHORIZATION', 'No verified tenant context');
+
+    const sid = req.sessionId;
+    if (!sid) {
+      next();
+      return;
+    }
+
+    const state = await isSessionLive(ctx, sid);
+    if (state !== 'live') {
+      // TOKEN_REVOKED, not INVALID_TOKEN: the client needs to know it should log in
+      // again rather than retry or refresh.
+      throw new ApiError('TOKEN_REVOKED', 'Session is no longer valid');
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
