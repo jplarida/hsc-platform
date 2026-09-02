@@ -7,6 +7,7 @@
 import { createApp } from './app.js';
 import { closePool } from './db/context.js';
 import { closeRedis, waitForReady } from './redis/client.js';
+import { startAuditWriter, stopAuditWriter } from './audit/phiLog.js';
 
 const port = Number(process.env['PORT'] ?? 3001);
 
@@ -14,6 +15,8 @@ const port = Number(process.env['PORT'] ?? 3001);
 // consumer falls through — but a limiter that answers indeterminate for the first
 // requests after a deploy fails open exactly when a restart storm makes that worst.
 await Promise.all([waitForReady('cache'), waitForReady('state')]);
+
+startAuditWriter();
 
 const server = createApp().listen(port, () => {
   console.log(`hsc-platform api listening on :${port}`);
@@ -25,6 +28,8 @@ const server = createApp().listen(port, () => {
 async function shutdown(signal: string): Promise<void> {
   console.log(`${signal} received, draining`);
   server.close(async () => {
+    // Flush before the pool closes, or queued events die with the process.
+    await stopAuditWriter();
     await closePool();
     await closeRedis();
     process.exit(0);

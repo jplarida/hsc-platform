@@ -504,6 +504,16 @@ GRANT  SELECT ON user_audit_log, data_audit_log, system_audit_log TO app_user;
 -- trigger-only, so app_user gets no INSERT on it.
 GRANT  INSERT ON user_audit_log, system_audit_log TO app_user;
 
+-- The PHI access-log writer batches events across tenants and runs as app_platform.
+--
+-- BYPASSRLS is a row-level exemption, NOT a table privilege — a role can be exempt from
+-- every policy on a table it has no right to touch. Without this grant the background
+-- writer fails with 'permission denied for table user_audit_log', and because it writes
+-- asynchronously the failure surfaces as a queue that never drains rather than as a
+-- failed request. The audit trail would appear to be working.
+GRANT SELECT, INSERT ON user_audit_log, system_audit_log TO app_platform;
+GRANT SELECT ON data_audit_log TO app_platform;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON
     retention_policies, retention_holds, purge_jobs, data_subject_requests,
     consent_records, audit_log_archives

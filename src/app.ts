@@ -16,6 +16,7 @@ import {
   errorHandler,
 } from './middleware/stack.js';
 import { rateLimit } from './middleware/rateLimit.js';
+import { auditGate, auditAccess } from './middleware/phiAudit.js';
 import { recordsRouter } from './routes/records.js';
 
 export function createApp(): Express {
@@ -42,7 +43,10 @@ export function createApp(): Express {
   // 6 authentication, 7 session check, 8 tenant binding, 9 rate limit. The order is
   // api/06's and is load-bearing: the session check needs sid from verified claims, and
   // the limiter needs the tenant to resolve its plan.
-  app.use('/v1', authenticate, checkSession, bindTenant, rateLimit());
+  // 14a runs BEFORE the handler: if the audit writer cannot keep up, no PHI is served
+  // at all. Checking afterwards would mean it had already gone out.
+  // 14b attaches to the response and records what was read once it succeeds.
+  app.use('/v1', auditGate, authenticate, checkSession, bindTenant, rateLimit(), auditAccess);
   app.use('/v1/records', recordsRouter);
 
   // 17 — error handler, registered last so it wraps everything above.

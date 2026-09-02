@@ -51,6 +51,15 @@ recordsRouter.get(
       return result.rows;
     });
 
+    // Stage 14 needs the record types that actually came back, not the ones the query
+    // asked for: an unfiltered list returns whatever the tenant has, and guessing from
+    // the query parameter would miss every PHI read made without a filter.
+    req.auditAccess = {
+      resourceType: 'record',
+      recordTypes: [...new Set(rows.map((r) => r.record_type))],
+      resultCount: rows.length,
+    };
+
     res.json({
       data: rows.map((r) => ({
         id: r.record_id,
