@@ -10,7 +10,7 @@
  * exact failure `performance/01` separates the instances to prevent.
  */
 
-import { redis, tryRedis } from '../redis/client.js';
+import { redis, tryRedis, UNAVAILABLE } from '../redis/client.js';
 import { LOG_ALGORITHM_MAX_LIMIT, SLIDING_WINDOW_LOG, TOKEN_BUCKET } from './scripts.js';
 
 export type LimitScope = 'tenant' | 'user' | 'ip' | 'endpoint' | 'device';
@@ -61,7 +61,7 @@ export async function checkLimit(rule: LimitRule, requestId: string): Promise<Li
     )) as [number, number, string | number];
   });
 
-  if (raw === null) {
+  if (raw === UNAVAILABLE) {
     return {
       allowed: false, limit: rule.limit, remaining: 0, resetSeconds: 0,
       scope: rule.scope, indeterminate: true,

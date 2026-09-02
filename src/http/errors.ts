@@ -27,6 +27,11 @@ export type ErrorCode =
   | 'INSUFFICIENT_SCOPE'
   | 'RESOURCE_NOT_FOUND'
   | 'VALIDATION_FAILED'
+  | 'IDEMPOTENCY_KEY_REQUIRED'
+  | 'IDEMPOTENCY_KEY_REUSE'
+  | 'IDEMPOTENT_REQUEST_IN_PROGRESS'
+  | 'PRECONDITION_REQUIRED'
+  | 'PRECONDITION_FAILED'
   | 'RATE_LIMIT_EXCEEDED'
   | 'QUOTA_EXCEEDED'
   | 'INTERNAL_ERROR';
@@ -45,6 +50,15 @@ const STATUS: Record<ErrorCode, number> = {
   INSUFFICIENT_SCOPE: 403,
   RESOURCE_NOT_FOUND: 404,
   VALIDATION_FAILED: 422,
+  IDEMPOTENCY_KEY_REQUIRED: 400,
+  // 422, not 409: the request is well-formed but its key contradicts a previous body.
+  // This is the code that catches a client reusing one key across several requests.
+  IDEMPOTENCY_KEY_REUSE: 422,
+  // A concurrent duplicate, still in flight. 409 rather than replaying a response that
+  // does not exist yet — the client should retry and will then get the replay.
+  IDEMPOTENT_REQUEST_IN_PROGRESS: 409,
+  PRECONDITION_REQUIRED: 428,
+  PRECONDITION_FAILED: 412,
   // Separated from QUOTA_EXCEEDED deliberately (api/02 correction 11): conflating them
   // makes clients retry a quota failure that will never succeed.
   RATE_LIMIT_EXCEEDED: 429,

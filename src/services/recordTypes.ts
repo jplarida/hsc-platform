@@ -11,7 +11,7 @@
  */
 
 import { withTenantContext, type VerifiedTenantContext } from '../db/context.js';
-import { tryRedis } from '../redis/client.js';
+import { tryRedis, UNAVAILABLE } from '../redis/client.js';
 
 const TTL_SECONDS = 300;
 const key = (tenantId: string) => `rtd:${tenantId}:phi`;
@@ -19,7 +19,7 @@ const key = (tenantId: string) => `rtd:${tenantId}:phi`;
 /** The set of record type codes flagged is_phi for this tenant. */
 async function phiTypesFor(ctx: VerifiedTenantContext): Promise<ReadonlySet<string>> {
   const cached = await tryRedis('cache', (client) => client.get(key(ctx.tenantId)));
-  if (cached) {
+  if (cached !== UNAVAILABLE && cached) {
     try {
       return new Set(JSON.parse(cached) as string[]);
     } catch {
@@ -64,7 +64,7 @@ const knownKey = (tenantId: string) => `rtd:${tenantId}:all`;
 
 async function knownTypesFor(ctx: VerifiedTenantContext): Promise<ReadonlySet<string>> {
   const cached = await tryRedis('cache', (client) => client.get(knownKey(ctx.tenantId)));
-  if (cached) {
+  if (cached !== UNAVAILABLE && cached) {
     try {
       return new Set(JSON.parse(cached) as string[]);
     } catch {

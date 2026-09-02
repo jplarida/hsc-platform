@@ -7,7 +7,7 @@
  */
 
 import { withTenantContext, type VerifiedTenantContext } from '../db/context.js';
-import { tryRedis } from '../redis/client.js';
+import { tryRedis, UNAVAILABLE } from '../redis/client.js';
 
 export interface PlanLimits {
   readonly requestsPerHour: number;
@@ -45,7 +45,7 @@ export async function planLimitsFor(ctx: VerifiedTenantContext): Promise<PlanLim
   const cacheKey = key(ctx.tenantId);
 
   const cached = await tryRedis('cache', (client) => client.get(cacheKey));
-  if (cached) {
+  if (cached !== UNAVAILABLE && cached) {
     try {
       return JSON.parse(cached) as PlanLimits;
     } catch {

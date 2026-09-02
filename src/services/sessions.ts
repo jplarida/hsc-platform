@@ -17,7 +17,7 @@
  */
 
 import { withTenantContext, type VerifiedTenantContext } from '../db/context.js';
-import { tryRedis } from '../redis/client.js';
+import { tryRedis, UNAVAILABLE } from '../redis/client.js';
 
 /** Seconds. Short, because it bounds how long a revoked session keeps working. */
 const TTL_SECONDS = 60;
@@ -40,8 +40,13 @@ export async function isSessionLive(
   const cacheKey = key(ctx.tenantId, sessionId);
 
   const cached = await tryRedis('cache', (client) => client.get(cacheKey));
-  if (cached === 'live') return 'live';
-  if (cached === 'revoked') return 'revoked';
+  // UNAVAILABLE and a cache miss take the same path — straight to the table — but they
+  // are written separately so the fall-through is a decision a reader can see rather
+  // than a consequence of a symbol never equalling a string.
+  if (cached !== UNAVAILABLE) {
+    if (cached === 'live') return 'live';
+    if (cached === 'revoked') return 'revoked';
+  }
 
   // Cache miss, or Redis unavailable. Fall through to the table — the source of truth is
   // right there, which is why this needs no availability trade-off.

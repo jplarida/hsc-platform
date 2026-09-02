@@ -95,22 +95,35 @@ export async function closeRedis(): Promise<void> {
 }
 
 /**
- * Run a Redis operation, returning `null` if Redis is unavailable or slow.
+ * Returned when Redis could not answer at all.
  *
- * `null` means "no answer", never "no". Every caller must distinguish those: treating an
- * unreachable cache as a negative result is how a Redis outage becomes a mass logout or
- * a platform-wide 403.
+ * A distinct symbol, NOT null. Redis legitimately replies null for several commands —
+ * GET on an absent key, and crucially SET..NX when the key already exists — so using
+ * null as the "no answer" sentinel conflates a real reply with an outage.
+ *
+ * That collision is not hypothetical: it silently disabled idempotency entirely. Every
+ * replay attempt read SET..NX's null as "store unavailable", took the fail-open branch,
+ * and re-executed the request. The mechanism looked present and did nothing.
+ */
+export const UNAVAILABLE = Symbol('redis-unavailable');
+
+/**
+ * Run a Redis operation.
+ *
+ * Returns UNAVAILABLE if Redis cannot answer. Every caller must distinguish that from a
+ * negative reply: treating an unreachable cache as a "no" is how a Redis outage becomes
+ * a mass logout or a platform-wide 403.
  */
 export async function tryRedis<T>(
   role: RedisRole,
   fn: (client: Redis) => Promise<T>,
-): Promise<T | null> {
+): Promise<T | typeof UNAVAILABLE> {
   const client = redis(role);
-  if (client.status !== 'ready') return null;
+  if (client.status !== 'ready') return UNAVAILABLE;
   try {
     return await fn(client);
   } catch (err) {
     console.warn(`[redis:${role}] command failed: ${(err as Error).message}`);
-    return null;
+    return UNAVAILABLE;
   }
 }
