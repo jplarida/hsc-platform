@@ -198,6 +198,11 @@ export async function cleanup(pool, tenantIds) {
     await c.query('DELETE FROM files WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM record_links WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM records WHERE tenant_id = ANY($1)', [tenantIds]);
+    // record_link_rules has composite foreign keys to record_type_definitions on
+    // (tenant_id, from_type_code) and (tenant_id, to_type_code), so the rules go first or
+    // the type definitions cannot be removed.
+    await c.query('DELETE FROM record_link_rules WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM record_state_transitions WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM record_type_definitions WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM user_roles WHERE user_id IN (SELECT user_id FROM tenant_users WHERE tenant_id = ANY($1))', [tenantIds]);
 

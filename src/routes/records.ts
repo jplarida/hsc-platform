@@ -21,6 +21,7 @@ import { validateBody, validateQuery } from '../middleware/validate.js';
 import { ApiError } from '../http/errors.js';
 import { decodeCursor, encodeCursor, success } from '../http/envelope.js';
 import { registerRecordDetailRoutes } from './recordDetail.js';
+import { registerRecordLinkRoutes } from './recordLinks.js';
 
 export const recordsRouter = Router();
 
@@ -186,4 +187,5 @@ recordsRouter.post(
 );
 
 // Attached last so the collection routes ('/') are matched before '/:record_id'.
+registerRecordLinkRoutes(recordsRouter);
 registerRecordDetailRoutes(recordsRouter);

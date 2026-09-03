@@ -353,6 +353,32 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
 
+  /records/{record_id}/links/{link_id}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+      - name: link_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Records]
+      summary: Remove a link
+      description: |
+        Listed in the endpoint catalogue of `02_ENDPOINT_SPECIFICATIONS.md` but absent from
+        this document until now — a drift between the two specifications rather than a new
+        endpoint.
+
+        Unlinking is a hard delete. A link is a relationship assertion rather than a record,
+        it carries no retention obligation of its own, and the `data_audit_log` trigger on
+        `record_links` already preserves what was removed.
+      responses:
+        '204':
+          description: Unlinked
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /records/{record_id}/advance:
     parameters:
       - $ref: '#/components/parameters/RecordId'

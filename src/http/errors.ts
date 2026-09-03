@@ -29,6 +29,7 @@ export type ErrorCode =
   | 'INSUFFICIENT_SCOPE'
   | 'RESOURCE_NOT_FOUND'
   | 'VALIDATION_FAILED'
+  | 'LINK_RULE_VIOLATION'
   | 'IDEMPOTENCY_KEY_REQUIRED'
   | 'IDEMPOTENCY_KEY_REUSE'
   | 'IDEMPOTENT_REQUEST_IN_PROGRESS'
@@ -52,6 +53,10 @@ const STATUS: Record<ErrorCode, number> = {
   INSUFFICIENT_SCOPE: 403,
   RESOURCE_NOT_FOUND: 404,
   VALIDATION_FAILED: 422,
+  // 422, per api/02: an impermissible link is a semantic failure of the request, not a
+  // database error leaking through. The trigger raises check_violation; this is what the
+  // client sees instead.
+  LINK_RULE_VIOLATION: 422,
   IDEMPOTENCY_KEY_REQUIRED: 400,
   // 422, not 409: the request is well-formed but its key contradicts a previous body.
   // This is the code that catches a client reusing one key across several requests.
