@@ -35,7 +35,13 @@ export function createApp(): Express {
   app.use(cors);
   // 4 — body limits, before authentication. api/06 correction 7: otherwise a 5 GB
   // unauthenticated body is buffered before anything decides to reject it.
-  app.use(express.json({ limit: '1mb' }));
+  // JSON Merge Patch carries its own media type (RFC 7396). Without listing it here the
+  // body arrives undefined and every PATCH looks like an empty patch — which would be
+  // read as 'change nothing' rather than as a parse failure.
+  app.use(express.json({
+    limit: '1mb',
+    type: ['application/json', 'application/merge-patch+json'],
+  }));
   // 5 — IP rate limit, BEFORE authentication. Auth does password hashing and database
   // work, so an unauthenticated flood must be cheap to refuse (api/06).
   app.use(ipRateLimit);

@@ -20,10 +20,11 @@ import { idempotency } from '../middleware/idempotency.js';
 import { validateBody, validateQuery } from '../middleware/validate.js';
 import { ApiError } from '../http/errors.js';
 import { decodeCursor, encodeCursor, success } from '../http/envelope.js';
+import { registerRecordDetailRoutes } from './recordDetail.js';
 
 export const recordsRouter = Router();
 
-interface RecordRow {
+export interface RecordRow {
   record_id: string;
   record_type: string;
   title: string | null;
@@ -37,7 +38,7 @@ interface RecordRow {
 }
 
 /** Shaped as `components/schemas/Record`. Absent rather than null for optional fields. */
-function toRecord(r: RecordRow): Record<string, unknown> {
+export function toRecord(r: RecordRow): Record<string, unknown> {
   return {
     record_id: r.record_id,
     record_type: r.record_type,
@@ -52,7 +53,7 @@ function toRecord(r: RecordRow): Record<string, unknown> {
   };
 }
 
-const SELECT_COLUMNS = `record_id, record_type, title, description, status,
+export const SELECT_COLUMNS = `record_id, record_type, title, description, status,
                         workflow_state, version, created_by, created_at, updated_at`;
 
 recordsRouter.get(
@@ -183,3 +184,6 @@ recordsRouter.post(
     res.status(201).json(success(toRecord(created), req.requestId));
   },
 );
+
+// Attached last so the collection routes ('/') are matched before '/:record_id'.
+registerRecordDetailRoutes(recordsRouter);
