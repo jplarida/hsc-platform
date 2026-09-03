@@ -235,8 +235,18 @@ rediscovered, and so they can be confirmed once the schema is applied:
     interacts with GDPR erasure, which `database/04` resolves by anonymising rather than
     deleting. The equivalent FK on `app_id` was dropped for exactly this reason.
 
+14. **A PostgreSQL error object leaks the offending column value.** `console.error(err)`
+    on a constraint violation prints `detail: Key (mrn)=(…) already exists`, and `database/03`
+    puts a UNIQUE index on `gc_mrn` — so a duplicate patient write printed a medical record
+    number to stdout, and from there to CloudWatch: outside the audit trail, outside the
+    retention policy, outside the BAA boundary. `observability/01` identified this class of
+    leak and prescribed an allowlist rather than a denylist, because three fields carry row
+    contents (`detail`, `where`, `internalQuery`) and a denylist written today would likely
+    have caught only the first. Found by constructing a real error and printing it, not by
+    reading the code — `console.error(msg, err)` looks entirely reasonable.
+
 Items 1–4, 8 and 9 are new; 5–7 are corrections to documented claims; 10–13 were found by
-executing the schema. Defects 8–13 were observed. Defects 1–7 were reasoned from the
+executing the schema, and 14 in the application layer. Defects 8–14 were observed. Defects 1–7 were reasoned from the
 manual, and 1–4 were confirmed correct when the migrations applied first try.
 
 ## Amendments folded in
