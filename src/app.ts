@@ -17,6 +17,7 @@ import {
 } from './middleware/stack.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { auditGate, auditAccess } from './middleware/phiAudit.js';
+import { cors, ipRateLimit } from './middleware/edge.js';
 import { recordsRouter } from './routes/records.js';
 
 export function createApp(): Express {
@@ -30,9 +31,14 @@ export function createApp(): Express {
   app.use(requestContext);
   // 2 — security headers
   app.use(securityHeaders);
+  // 3 — CORS. Before the body parser so a preflight never buffers one.
+  app.use(cors);
   // 4 — body limits, before authentication. api/06 correction 7: otherwise a 5 GB
   // unauthenticated body is buffered before anything decides to reject it.
   app.use(express.json({ limit: '1mb' }));
+  // 5 — IP rate limit, BEFORE authentication. Auth does password hashing and database
+  // work, so an unauthenticated flood must be cheap to refuse (api/06).
+  app.use(ipRateLimit);
 
   // Unauthenticated. Deliberately above the auth middleware, and deliberately empty of
   // anything that touches the database or reveals a version number.

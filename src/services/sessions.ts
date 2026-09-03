@@ -18,6 +18,7 @@
 
 import { withTenantContext, type VerifiedTenantContext } from '../db/context.js';
 import { tryRedis, UNAVAILABLE } from '../redis/client.js';
+import { onInvalidate, publishInvalidation } from '../redis/invalidation.js';
 
 /** Seconds. Short, because it bounds how long a revoked session keeps working. */
 const TTL_SECONDS = 60;
@@ -78,4 +79,17 @@ export async function isSessionLive(
  */
 export async function invalidateSession(tenantId: string, sessionId: string): Promise<void> {
   await tryRedis('cache', (client) => client.del(key(tenantId, sessionId)));
+  // Drop it everywhere, not just here. With 2-20 API tasks, deleting the local copy leaves
+  // every other task admitting the revoked token until its own copy expires - up to the
+  // full TTL. That is fine for an ordinary logout and not fine for a compromised account,
+  // which is the case revocation exists for.
+  await publishInvalidation({ ns: 'sess', tenant: tenantId, key: sessionId });
+}
+
+/** Registered at boot so a revocation published by another task lands here too. */
+export function subscribeToSessionInvalidation(): void {
+  onInvalidate(async (message) => {
+    if (message.ns !== 'sess') return;
+    await tryRedis('cache', (c) => c.del(key(message.tenant, message.key)));
+  });
 }

@@ -8,6 +8,8 @@ import { createApp } from './app.js';
 import { closePool } from './db/context.js';
 import { closeRedis, waitForReady } from './redis/client.js';
 import { startAuditWriter, stopAuditWriter } from './audit/phiLog.js';
+import { startInvalidationListener, stopInvalidationListener } from './redis/invalidation.js';
+import { subscribeToSessionInvalidation } from './services/sessions.js';
 
 const port = Number(process.env['PORT'] ?? 3001);
 
@@ -17,6 +19,8 @@ const port = Number(process.env['PORT'] ?? 3001);
 await Promise.all([waitForReady('cache'), waitForReady('state')]);
 
 startAuditWriter();
+startInvalidationListener();
+subscribeToSessionInvalidation();
 
 const server = createApp().listen(port, () => {
   console.log(`hsc-platform api listening on :${port}`);
@@ -30,6 +34,7 @@ async function shutdown(signal: string): Promise<void> {
   server.close(async () => {
     // Flush before the pool closes, or queued events die with the process.
     await stopAuditWriter();
+    await stopInvalidationListener();
     await closePool();
     await closeRedis();
     process.exit(0);
