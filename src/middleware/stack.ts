@@ -16,6 +16,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { ApiError, errorBody } from '../http/errors.js';
+import { formatError } from '../http/safeLog.js';
 import { deriveContext, type VerifiedTenantContext } from '../db/context.js';
 import { verifyAccessToken } from '../auth/token.js';
 import { isSessionLive } from '../services/sessions.js';
@@ -148,9 +149,12 @@ export function errorHandler(
       : new ApiError('INTERNAL_ERROR', 'An unexpected error occurred');
 
   if (!(err instanceof ApiError)) {
-    // The real error is logged but never returned: an internal message can carry a
-    // table name, a column, or a fragment of another tenant's data.
-    console.error(`[${req.requestId}] unhandled:`, err);
+    // Redacted, not raw. A PostgreSQL error carries the offending column value in
+    // `detail` — a duplicate MRN prints the MRN — and stdout goes to CloudWatch, outside
+    // the audit trail and outside the BAA boundary. observability/01 prescribes an
+    // allowlist for exactly this, so formatError names what may be logged rather than
+    // trying to remember what may not.
+    console.error(`[${req.requestId}] unhandled: ${formatError(err)}`);
   }
 
   res.status(apiErr.status).json(errorBody(apiErr, req.requestId));
