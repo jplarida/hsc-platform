@@ -7,6 +7,34 @@ This repository holds both the design documents and the implementation. The docu
 first and are still the source of truth: where the code and a specification disagree, the
 specification is normally right and the code is the thing to fix.
 
+## Why it exists
+
+Distilled from `documents/healthcare/BUSINESS_PRODUCT_PLANNING.md`, which is where the
+market analysis and personas live.
+
+The target is small-to-medium regulated practices — medical and dental clinics, veterinary
+and mental health practices, then legal, accounting and consulting firms. Ten to five
+hundred people. The operations manager running one of them is described as juggling
+several disconnected systems, re-entering the same data into each, and spending real time
+assembling compliance reports by hand.
+
+So the product is **one configurable system in place of several disconnected ones, with
+compliance built into the substrate rather than bolted on afterwards**. That is the whole
+thesis, and nearly every architectural decision here follows from it:
+
+| Because the product is… | The architecture has to… |
+|---|---|
+| Sold to many small practices, not installed per customer | Be multi-tenant, with isolation strong enough to be a compliance control |
+| Aimed at healthcare *and* legal *and* professional services | Have no fixed schema — hence the generic record model and per-tenant type registry |
+| Handling patient records in the lead vertical | Treat HIPAA as a design constraint, not a feature: audit everything, log PHI reads, never let PHI leave the boundary casually |
+| Used in clinics and in the field | Work offline and reconcile afterwards |
+| Replacing the systems a practice already runs on | Integrate outward — webhooks, an API, eventually a partner marketplace |
+
+This also explains the open vertical question below. The business plan targets three
+markets at once, and the schema is deliberately built to serve all of them — but the first
+industry pack, and whether PHI is the common case or the exception, cannot stay undecided
+forever.
+
 ## Status
 
 | | |
