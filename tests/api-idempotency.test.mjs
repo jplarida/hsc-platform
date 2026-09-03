@@ -75,23 +75,23 @@ after(async () => {
 
 describe('creating a record', () => {
   test('a valid create returns 201 with an ETag', async () => {
-    const res = await post('/v1/records', { type: 'note', title: 'first' }, { key: randomUUID() });
+    const res = await post('/v1/records', { record_type: 'note', title: 'first' }, { key: randomUUID() });
     assert.equal(res.status, 201);
-    assert.equal(res.body.type, 'note');
-    assert.equal(res.body.version, 1);
+    assert.equal(res.body.data.record_type, 'note');
+    assert.equal(res.body.data.version, 1);
     // The version is the ETag api/02 uses for optimistic concurrency on later writes.
     assert.equal(res.headers.get('etag'), '"1"');
   });
 
   test('the row actually reaches the database', async () => {
-    await post('/v1/records', { type: 'note', title: 'persisted' }, { key: randomUUID() });
+    await post('/v1/records', { record_type: 'note', title: 'persisted' }, { key: randomUUID() });
     assert.equal(await countRecords(t.id, 'persisted'), 1);
   });
 
   test('a create writes a data_audit_log row', async () => {
     // The trigger fires on INSERT; this confirms the write path runs inside a tenant
     // context, since without one the trigger cannot resolve a tenant and raises.
-    await post('/v1/records', { type: 'note', title: 'audited-create' }, { key: randomUUID() });
+    await post('/v1/records', { record_type: 'note', title: 'audited-create' }, { key: randomUUID() });
     const n = await asOwner(pool, async (c) => {
       const { rows } = await c.query(
         `SELECT COUNT(*)::int AS n FROM data_audit_log
@@ -110,7 +110,7 @@ describe('creating a record', () => {
   test('an unknown record type is refused by the foreign key', async () => {
     // fk_records_type ties every record to a declared type per tenant, so a typo fails
     // loudly instead of creating an invisible orphan class of records.
-    const res = await post('/v1/records', { type: 'not-a-real-type' }, { key: randomUUID() });
+    const res = await post('/v1/records', { record_type: 'not-a-real-type' }, { key: randomUUID() });
     assert.ok(res.status >= 400, 'an undeclared type must not be insertable');
   });
 
@@ -118,7 +118,7 @@ describe('creating a record', () => {
     const readOnly = await signAccessToken({
       tenantId: t.id, userId: t.userId, permissions: ['records:read'],
     });
-    const res = await post('/v1/records', { type: 'note' }, { key: randomUUID(), tok: readOnly });
+    const res = await post('/v1/records', { record_type: 'note' }, { key: randomUUID(), tok: readOnly });
     assert.equal(res.status, 403);
   });
 });
@@ -127,7 +127,7 @@ describe('idempotency', () => {
   test('the key is required on this endpoint', async () => {
     // api/02 lists POST /records explicitly. Optional would mean every client that
     // forgets silently reintroduces duplicates.
-    const res = await post('/v1/records', { type: 'note', title: 'no key' });
+    const res = await post('/v1/records', { record_type: 'note', title: 'no key' });
     assert.equal(res.status, 400);
     assert.equal(res.body.error.code, 'IDEMPOTENCY_KEY_REQUIRED');
     assert.equal(await countRecords(t.id, 'no key'), 0, 'nothing should have been created');
@@ -135,7 +135,7 @@ describe('idempotency', () => {
 
   test('a replay returns the original response and creates nothing new', async () => {
     const key = randomUUID();
-    const body = { type: 'note', title: 'replayed' };
+    const body = { record_type: 'note', title: 'replayed' };
 
     const first = await post('/v1/records', body, { key });
     assert.equal(first.status, 201);
@@ -143,7 +143,7 @@ describe('idempotency', () => {
     const second = await post('/v1/records', body, { key });
     assert.equal(second.status, 201);
     assert.equal(second.headers.get('idempotency-replayed'), 'true');
-    assert.equal(second.body.id, first.body.id, 'the same record, not a new one');
+    assert.equal(second.body.data.record_id, first.body.data.record_id, 'the same record, not a new one');
 
     assert.equal(await countRecords(t.id, 'replayed'), 1, 'exactly one row');
   });
@@ -151,9 +151,9 @@ describe('idempotency', () => {
   test('the same key with a different body is 422 IDEMPOTENCY_KEY_REUSE', async () => {
     // The client bug this catches: reusing one key across several distinct requests.
     const key = randomUUID();
-    await post('/v1/records', { type: 'note', title: 'original' }, { key });
+    await post('/v1/records', { record_type: 'note', title: 'original' }, { key });
 
-    const res = await post('/v1/records', { type: 'note', title: 'different' }, { key });
+    const res = await post('/v1/records', { record_type: 'note', title: 'different' }, { key });
     assert.equal(res.status, 422);
     assert.equal(res.body.error.code, 'IDEMPOTENCY_KEY_REUSE');
     assert.equal(await countRecords(t.id, 'different'), 0, 'the second body must not be written');
@@ -163,7 +163,7 @@ describe('idempotency', () => {
     // Two structurally identical bodies must hash the same regardless of the order a
     // client's serialiser emitted them, or a legitimate retry looks like key reuse.
     const key = randomUUID();
-    const a = await post('/v1/records', { type: 'note', title: 'ordered' }, { key });
+    const a = await post('/v1/records', { record_type: 'note', title: 'ordered' }, { key });
     assert.equal(a.status, 201);
 
     const res = await fetch(`${base}/v1/records`, {
@@ -173,7 +173,7 @@ describe('idempotency', () => {
         authorization: `Bearer ${token}`,
         'idempotency-key': key,
       },
-      body: '{"title":"ordered","type":"note"}',
+      body: '{"title":"ordered","record_type":"note"}',
     });
     assert.equal(res.status, 201);
     assert.equal(res.headers.get('idempotency-replayed'), 'true');
@@ -183,7 +183,7 @@ describe('idempotency', () => {
     // The case a read-then-write misses entirely: both requests see no key and both
     // execute. SET NX makes the claim atomic, so one wins and the other is told to retry.
     const key = randomUUID();
-    const body = { type: 'note', title: 'concurrent' };
+    const body = { record_type: 'note', title: 'concurrent' };
 
     const [a, b] = await Promise.all([
       post('/v1/records', body, { key }),
@@ -203,15 +203,15 @@ describe('idempotency', () => {
     // reservation would make a legitimate retry wait out the TTL for no reason.
     const key = randomUUID();
 
-    const failed = await post('/v1/records', { type: 'not-a-real-type' }, { key });
+    const failed = await post('/v1/records', { record_type: 'not-a-real-type' }, { key });
     assert.ok(failed.status >= 400);
 
-    const retried = await post('/v1/records', { type: 'note', title: 'after failure' }, { key });
+    const retried = await post('/v1/records', { record_type: 'note', title: 'after failure' }, { key });
     assert.equal(retried.status, 201, 'the key must be reusable after a failure');
   });
 
   test('a malformed key is refused', async () => {
-    const res = await post('/v1/records', { type: 'note' }, { key: 'short' });
+    const res = await post('/v1/records', { record_type: 'note' }, { key: 'short' });
     assert.equal(res.status, 400);
   });
 
@@ -225,7 +225,7 @@ describe('idempotency', () => {
     });
 
     const key = randomUUID();
-    const body = { type: 'note', title: 'phi-create' };
+    const body = { record_type: 'note', title: 'phi-create' };
     await post('/v1/records', body, { key, tok: phiToken });
     await post('/v1/records', body, { key, tok: phiToken });
     await flushAuditForTest();

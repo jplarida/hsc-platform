@@ -68,8 +68,21 @@ export function deriveContext(claims: {
 }
 
 let pool: pg.Pool | undefined;
+/**
+ * Set by closePool(). Without it getPool() silently builds a NEW pool after shutdown.
+ *
+ * That is not theoretical: the PHI audit middleware runs in a res.on('finish') handler,
+ * so it touches the database AFTER the response has been sent. During shutdown those
+ * late handlers resurrected the pool, and its idle timer then kept the process alive
+ * indefinitely — a drain that never finishes. Refusing is correct: once the pool is
+ * closed there is no more database work to do.
+ */
+let closed = false;
 
 export function getPool(): pg.Pool {
+  if (closed) {
+    throw new Error('The database pool is closed; this process is shutting down');
+  }
   if (!pool) {
     const connectionString = process.env['DATABASE_URL'];
     if (!connectionString) throw new Error('DATABASE_URL is not set');
@@ -86,10 +99,17 @@ export function getPool(): pg.Pool {
 }
 
 export async function closePool(): Promise<void> {
+  closed = true;
   if (pool) {
     await pool.end();
     pool = undefined;
   }
+}
+
+/** Tests only: allow a fresh pool after a close. */
+export function reopenPoolForTest(): void {
+  closed = false;
+  pool = undefined;
 }
 
 /** The only handle a caller ever gets. Deliberately narrower than pg.PoolClient. */

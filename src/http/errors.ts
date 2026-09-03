@@ -13,6 +13,8 @@
  *   record exists. A permission failure *inside* your own tenant is a genuine 403.
  */
 
+import { meta, type Meta } from './envelope.js';
+
 export type ErrorCode =
   | 'MISSING_AUTHORIZATION'
   | 'INVALID_TOKEN'
@@ -80,22 +82,36 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The ErrorEnvelope from api/openapi.yaml: { success: false, error, meta }.
+ *
+ * request_id lives in meta rather than inside error, because the contract puts it there
+ * and it is the same meta every success response carries. An earlier version of this
+ * file invented its own shape and drifted from the spec on day one.
+ */
 export interface ErrorBody {
+  success: false;
   error: {
     code: ErrorCode;
     message: string;
-    request_id: string;
     details?: Record<string, unknown>;
+    field_errors?: readonly { field: string; code: string; message: string }[];
   };
+  meta: Meta;
 }
 
 export function errorBody(err: ApiError, requestId: string): ErrorBody {
+  const fieldErrors = err.details?.['field_errors'];
   return {
+    success: false,
     error: {
       code: err.code,
       message: err.message,
-      request_id: requestId,
       ...(err.details ? { details: err.details } : {}),
+      ...(Array.isArray(fieldErrors)
+        ? { field_errors: fieldErrors as { field: string; code: string; message: string }[] }
+        : {}),
     },
+    meta: meta(requestId),
   };
 }
