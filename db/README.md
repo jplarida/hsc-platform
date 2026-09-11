@@ -5,15 +5,21 @@ Prisma generates the typed client from the live database and does not own the sc
 
 ## Status
 
-**The schema runs and the tests pass.** All eight migrations apply cleanly from an empty
-database, and the 44 assertions in `tests/` pass — verified twice from a freshly recreated
-volume, serially.
+**The schema runs and the tests pass.** All nine migrations apply cleanly from an empty
+database, and the 175 tests in `tests/` pass — verified from a freshly recreated volume,
+serially.
 
 ```
 npm run db:up        # docker compose up -d
 npm run db:migrate   # prisma migrate deploy
-npm test             # 44 pass, 0 fail
+npm test             # 175 pass, 0 fail
 ```
+
+Migration 0009 was added later than the rest and for a different reason: `database/07`
+Part B specified tenant data import in full and **its tables were never extracted**, which
+no test could detect — `schema-invariants` asserts properties of the tables that exist, and
+a table never created has no properties to assert. The rest of Phase 1 was audited for the
+same gap and is clean. See `documents/healthcare/IMPLEMENTATION_GAPS.md` Part F.
 
 The stack is Docker Compose: PostgreSQL 17.6 on **5433** (5432 is taken by a native
 install on this machine) plus the two Redis instances `performance/01` requires, all bound
@@ -86,6 +92,7 @@ prisma/
     20260901120500_file_document/           files, versions, variants, shares
     20260901120600_api_layer/               API keys, webhooks, outbox, integrations
     20260901120700_partner_ecosystem/       partners, apps, consent, marketplace, payouts
+    20260911120800_tenant_data_import/      import jobs, mappings, staging, row errors
 scripts/
   db-create.mjs                     creates the dev database and owner role
   lint-migrations.mjs               static checks; encodes database/07's per-table checklist
@@ -245,8 +252,23 @@ rediscovered, and so they can be confirmed once the schema is applied:
     have caught only the first. Found by constructing a real error and printing it, not by
     reading the code — `console.error(msg, err)` looks entirely reasonable.
 
+15. **The retention policy `database/07` requires for import data could not be expressed.**
+    Part B is explicit that `import_row_errors.source_row` — the raw failed row, PHI when
+    the import is a patient list — needs a retention policy, "because keeping failed rows
+    indefinitely creates a second, unmanaged copy of regulated data". But `retention_scope`
+    is `('record_type', 'file', 'audit_log')`, and none of the three covers import data, so
+    the instruction was unimplementable as written. Migration 0009 adds `'import_data'`.
+    Found by trying to satisfy the requirement rather than by reading either document —
+    each is internally consistent, and the gap is only visible where they meet.
+
+    Worth knowing for the next enum change: `ALTER TYPE … ADD VALUE` is legal inside
+    Prisma's transaction wrapper on PostgreSQL 12+, but the new value **cannot be used in
+    the same transaction**. Nothing in 0009 uses it, so it applies. A migration that also
+    inserted a policy row using the new value would fail.
+
 Items 1–4, 8 and 9 are new; 5–7 are corrections to documented claims; 10–13 were found by
-executing the schema, and 14 in the application layer. Defects 8–14 were observed. Defects 1–7 were reasoned from the
+executing the schema, 14 in the application layer, and 15 by implementing a requirement
+that spanned two documents. Defects 8–15 were observed. Defects 1–7 were reasoned from the
 manual, and 1–4 were confirmed correct when the migrations applied first try.
 
 ## Amendments folded in

@@ -44,14 +44,30 @@ These have written specifications in this corpus. Building them is scheduling, n
 | `/webhooks` | Telling other systems something happened | `api/04` | |
 | `/audit-logs` | Letting a compliance officer *read* the history | `api/02`, `database/04` | Recording works; reading it back does not exist |
 | Any user interface | There are no screens at all | `frontend/01`–`07`, `UI_WIREFRAMES.md` | Everything above is the engine |
-| Tenant data import | Customer uploads their existing records | `database/07` Part B, `TENANT_ONBOARDING_FLOW.md`, `experience/01` | See the caveat below |
+| Tenant data import | Customer uploads their existing records | `database/07` Part B, `TENANT_ONBOARDING_FLOW.md`, `experience/01` | Schema landed in 0009; the loader itself is unbuilt |
 
-**Import caveat.** `database/07` Part B specifies the flow, the legacy field mapping, the
-validation and cleansing pass, throughput, and reversal by `import_job_id` — but its three
-tables (`import_jobs`, `import_field_mappings`, `import_row_errors`) were **not carried into
-the eight migrations**. So import is specified, is commercially load-bearing
-(`TENANT_ONBOARDING_FLOW.md` puts it at 35% of onboarding time and names import confusion as
-a top support topic), and has no schema behind it yet.
+**Import caveat — resolved in the schema, 2026-09-11.** `database/07` Part B specifies the
+flow, the legacy field mapping, the validation and cleansing pass, throughput, and reversal
+by `import_job_id` — but its three tables were **not carried into the original eight
+migrations**, so import read as handled on every checklist with no schema behind it.
+
+Migration `20260911120800_tenant_data_import` closes that, with three deviations from Part B
+as written, each recorded in the migration itself:
+
+- **Four tables, not three.** `import_staging` is loaded by Part B's flow and joined by its
+  own second-pass link query, but was never given DDL — it is Part B's open question 1.
+  Building only the three named tables would have reproduced the exact defect this document
+  was written about. Its shape is derived from the document's usage, and the open question's
+  stated assumption (one wide JSONB table rather than per-job temporaries) is the one taken.
+- **`retention_scope` gains `'import_data'`.** See `db/README.md` defect 15 — the retention
+  policy Part B requires for `import_row_errors.source_row` was not expressible.
+- **Only `import_jobs` is audited.** A bulk PHI load is an administrative act worth one audit
+  row; staging and row errors are per-source-row and would multiply the audit cost Part B
+  already flags for large imports.
+
+Still unbuilt: the loader, the dry-run reporting, the two-pass link resolution and the
+reversal guard. The reversal guard is the load-bearing one — Part B requires reversal to
+refuse once a tenant has edited an imported record, or it destroys the tenant's own work.
 
 ---
 
@@ -174,14 +190,15 @@ recorded in `db/README.md`.
 
 Run 2026-09-11, prompted by the import finding. Every table declared in `database/01`–`08` and
 `DATABASE_SCHEMA.md` — both SQL `CREATE TABLE` statements and mermaid ERD entities, 63 distinct
-names — was compared against the 82 created by the migrations.
+names — was compared against the 82 created by the migrations. Counts here are as of the
+audit, before migration 0009 added four more.
 
 **Result: the import tables are the only genuine gap.** Nine names differ, and six of those are
 explained:
 
 | Absent from migrations | Verdict |
 |---|---|
-| `import_jobs`, `import_field_mappings`, `import_row_errors` | **Real gap.** `database/07` Part B |
+| `import_jobs`, `import_field_mappings`, `import_row_errors` | **Was the only real gap.** Closed by migration 0009, which also adds the `import_staging` Part B referenced but never defined |
 | `local_config`, `local_records`, `local_files`, `pending_changes`, `sync_metadata` | Correct — `DATABASE_SCHEMA.md`'s "Mobile Offline Database Schema (SQLite)". Client-side, never Postgres |
 | `data_audit_log_2026_09` | Correct — a worked example of a monthly partition, not a table to create. Partitions plus a DEFAULT are created and asserted by `schema-invariants.test.mjs` |
 
