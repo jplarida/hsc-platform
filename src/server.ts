@@ -8,6 +8,7 @@ import { createApp } from './app.js';
 import { closePool } from './db/context.js';
 import { closeRedis, waitForReady } from './redis/client.js';
 import { startAuditWriter, stopAuditWriter } from './audit/phiLog.js';
+import { startImportWorker, stopImportWorker } from './imports/worker.js';
 import { startInvalidationListener, stopInvalidationListener } from './redis/invalidation.js';
 import { subscribeToSessionInvalidation } from './services/sessions.js';
 
@@ -19,6 +20,7 @@ const port = Number(process.env['PORT'] ?? 3001);
 await Promise.all([waitForReady('cache'), waitForReady('state')]);
 
 startAuditWriter();
+startImportWorker();
 startInvalidationListener();
 subscribeToSessionInvalidation();
 
@@ -33,6 +35,9 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`${signal} received, draining`);
   server.close(async () => {
     // Flush before the pool closes, or queued events die with the process.
+    // Import worker first: it holds database transactions, and stopping it before the
+    // pool closes is what lets an in-flight job finish rather than rolling back mid-load.
+    await stopImportWorker();
     await stopAuditWriter();
     await stopInvalidationListener();
     await closePool();

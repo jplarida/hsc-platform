@@ -5,14 +5,14 @@ Prisma generates the typed client from the live database and does not own the sc
 
 ## Status
 
-**The schema runs and the tests pass.** All nine migrations apply cleanly from an empty
-database, and the 175 tests in `tests/` pass — verified from a freshly recreated volume,
+**The schema runs and the tests pass.** All ten migrations apply cleanly from an empty
+database, and the 211 tests in `tests/` pass — verified from a freshly recreated volume,
 serially.
 
 ```
 npm run db:up        # docker compose up -d
 npm run db:migrate   # prisma migrate deploy
-npm test             # 175 pass, 0 fail
+npm test             # 211 pass, 0 fail
 ```
 
 Migration 0009 was added later than the rest and for a different reason: `database/07`
@@ -93,6 +93,7 @@ prisma/
     20260901120600_api_layer/               API keys, webhooks, outbox, integrations
     20260901120700_partner_ecosystem/       partners, apps, consent, marketplace, payouts
     20260911120800_tenant_data_import/      import jobs, mappings, staging, row errors
+    20260913120900_import_platform_grant/   app_platform SELECT, for the import sweep
 scripts/
   db-create.mjs                     creates the dev database and owner role
   lint-migrations.mjs               static checks; encodes database/07's per-table checklist
@@ -125,7 +126,7 @@ npm install
 cp .env.example .env        # or write the compose values, see below
 npm run db:up               # postgres + both redis instances
 npm run db:migrate          # prisma migrate deploy
-npm test                    # 44 assertions, serial
+npm test                    # 211 tests, serial
 
 npm run lint:migrations     # static checks, no database needed
 npm run db:pull             # introspect into schema.prisma (not yet run)

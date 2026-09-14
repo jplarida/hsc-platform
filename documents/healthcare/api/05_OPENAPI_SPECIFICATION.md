@@ -30,7 +30,10 @@ endpoints from doc 02 are mechanical to add. The endpoints deliberately included
 that establish a rule: `/records/{id}` for `If-Match`, `/sync/push` for per-item results,
 `/files/{id}/download` for the scan gate, `/audit-logs` for the self-auditing read.
 
-Still to add: `/forms`, `/workflows`, `/users`, `/tenant/*`, `/api-keys`, `/imports`,
+`/imports` was added once the loader was built — `database/07` Part B's pipeline needed a
+contract before it could have a handler, since requests validate out of this document.
+
+Still to add: `/forms`, `/workflows`, `/users`, `/tenant/*`, `/api-keys`,
 `/search/advanced`, the remaining file and upload routes, and the rest of the auth endpoints.
 
 ---

@@ -202,6 +202,14 @@ export async function cleanup(pool, tenantIds) {
     // (tenant_id, from_type_code) and (tenant_id, to_type_code), so the rules go first or
     // the type definitions cannot be removed.
     await c.query('DELETE FROM record_link_rules WHERE tenant_id = ANY($1)', [tenantIds]);
+    // import_jobs is the SAME shape of trap, found the same way: it holds a composite FK on
+    // (tenant_id, target_record_type). The children cascade from import_jobs, but they are
+    // deleted explicitly so this list reads as what it is — the full set of tables that
+    // must go before a record type can.
+    await c.query('DELETE FROM import_row_errors WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM import_staging WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM import_field_mappings WHERE tenant_id = ANY($1)', [tenantIds]);
+    await c.query('DELETE FROM import_jobs WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM record_state_transitions WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM record_type_definitions WHERE tenant_id = ANY($1)', [tenantIds]);
     await c.query('DELETE FROM user_roles WHERE user_id IN (SELECT user_id FROM tenant_users WHERE tenant_id = ANY($1))', [tenantIds]);

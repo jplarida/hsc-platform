@@ -35,6 +35,7 @@ export type ErrorCode =
   | 'IDEMPOTENT_REQUEST_IN_PROGRESS'
   | 'PRECONDITION_REQUIRED'
   | 'PRECONDITION_FAILED'
+  | 'IMPORT_NOT_REVERSIBLE'
   | 'RATE_LIMIT_EXCEEDED'
   | 'QUOTA_EXCEEDED'
   | 'INTERNAL_ERROR';
@@ -66,6 +67,11 @@ const STATUS: Record<ErrorCode, number> = {
   IDEMPOTENT_REQUEST_IN_PROGRESS: 409,
   PRECONDITION_REQUIRED: 428,
   PRECONDITION_FAILED: 412,
+  // 409, not 412. There is no precondition the client could have supplied that would have
+  // made this succeed: reversal stops being safe the moment the tenant edits an imported
+  // record, and no header expresses "as long as nobody has touched it". The state of the
+  // resource conflicts with the request, which is what 409 is for.
+  IMPORT_NOT_REVERSIBLE: 409,
   // Separated from QUOTA_EXCEEDED deliberately (api/02 correction 11): conflating them
   // makes clients retry a quota failure that will never succeed.
   RATE_LIMIT_EXCEEDED: 429,

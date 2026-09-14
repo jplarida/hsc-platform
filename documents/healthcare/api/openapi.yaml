@@ -711,6 +711,148 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /imports:
+    post:
+      tags: [Imports]
+      summary: Start an import job
+      description: |
+        Requires `records:import`. Returns `202 Accepted` with a `Location` header naming the
+        job; the work happens asynchronously (`database/07` Part B).
+
+        **A dry run is the normal first step, and the default.** It stages, cleanses and
+        validates every row and writes nothing to `records`, so a customer can iterate on the
+        mapping against real validation output. Committing means submitting the same mapping
+        again with `is_dry_run: false`.
+
+        Rows are supplied inline. `source_file_id` is accepted for when `/files` exists, but a
+        stored file cannot yet be read, so a job naming one is rejected rather than silently
+        importing nothing.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportInput'
+      responses:
+        '202':
+          description: Accepted; poll the job for progress
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ImportJob'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /imports/{import_job_id}:
+    get:
+      tags: [Imports]
+      summary: Read an import job
+      description: |
+        Requires `records:import`. Counts are authoritative here rather than in the queue:
+        job state lives in PostgreSQL, and Redis carries only the wake-up signal.
+      parameters:
+        - $ref: '#/components/parameters/ImportJobId'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ImportJob'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /imports/{import_job_id}/errors:
+    get:
+      tags: [Imports]
+      summary: Rows that failed validation
+      description: |
+        Requires `records:import`. Each entry carries the raw source row, so **this endpoint
+        returns customer data and is PHI-bearing whenever the target type is**. It is audited
+        as an access for that reason.
+      parameters:
+        - $ref: '#/components/parameters/ImportJobId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of row errors
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ImportRowError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /imports/{import_job_id}/reverse:
+    post:
+      tags: [Imports]
+      summary: Reverse an imported batch
+      description: |
+        Requires `records:import`. Deletes every record carrying this `import_job_id`, and the
+        links between them.
+
+        **Refuses once the tenant has edited any imported record.** `database/07` is explicit
+        that reversal is safe only before the tenant starts working on the data; past that
+        point it destroys their own work rather than undoing ours. A job that has already been
+        reversed, or that never loaded anything, is also refused.
+      parameters:
+        - $ref: '#/components/parameters/ImportJobId'
+      responses:
+        '200':
+          description: Reversed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ImportJob'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The batch can no longer be reversed safely
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
 components:
 
   securitySchemes:
@@ -733,6 +875,13 @@ components:
   parameters:
     RecordId:
       name: record_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ImportJobId:
+      name: import_job_id
       in: path
       required: true
       schema:
@@ -1199,3 +1348,151 @@ components:
               type: string
             subdomain:
               type: string
+
+    ImportFieldMapping:
+      type: object
+      description: |
+        How one source column becomes part of a record.
+
+        `target_path` selects the destination:
+          * `title`, `description`, `status`, `external_id` — first-class columns
+          * `data.<path>` — nested inside the record's JSONB payload
+          * `link:<link_type>:<to_type_code>` — the column holds the *external id* of another
+            record, resolved on a second pass once both sides exist
+
+        `transform` is the only cleansing applied. Anything not declared is left exactly as it
+        arrived: guessing at a customer's data is how imports become untrustworthy.
+      required: [source_column, target_path]
+      properties:
+        source_column:
+          type: string
+          maxLength: 255
+        target_path:
+          type: string
+          maxLength: 255
+          example: data.mrn
+        transform:
+          type: string
+          enum: [trim, iso_date, e164, upper]
+        is_required:
+          type: boolean
+          default: false
+        default_value:
+          type: string
+          description: Used when the source value is absent or empty.
+
+    ImportInput:
+      type: object
+      required: [target_record_type, mappings, rows]
+      properties:
+        source_type:
+          type: string
+          enum: [csv, api, manual]
+          default: api
+        source_file_id:
+          type: string
+          format: uuid
+          description: Reserved for when `/files` exists. Rejected until then.
+        target_record_type:
+          type: string
+          maxLength: 100
+          description: Must be a declared record type in this tenant's registry.
+        is_dry_run:
+          type: boolean
+          default: true
+          description: |
+            Defaults to true. A dry run validates everything and writes no records, which is
+            the loop a customer iterates on before committing.
+        mapping_template_name:
+          type: string
+          maxLength: 150
+          description: Save this mapping under a name for reuse on later jobs.
+        mappings:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ImportFieldMapping'
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          description: |
+            Source rows, as flat objects keyed by source column. Bounded per request — a larger
+            load is several jobs until `/files` can carry the source document.
+          items:
+            type: object
+            additionalProperties: true
+
+    ImportJob:
+      type: object
+      properties:
+        import_job_id:
+          type: string
+          format: uuid
+        source_type:
+          type: string
+          enum: [csv, api, manual]
+        target_record_type:
+          type: string
+        is_dry_run:
+          type: boolean
+        status:
+          type: string
+          enum: [pending, running, succeeded, failed, skipped]
+          description: |
+            `skipped` is what a reversed job becomes — `database/07`'s reversal sets it, rather
+            than introducing a status the schema's `job_status` enum does not have.
+        total_rows:
+          type: integer
+        valid_rows:
+          type: integer
+        error_rows:
+          type: integer
+        imported_rows:
+          type: integer
+        created_by:
+          type: string
+          format: uuid
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        reversed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    ImportRowError:
+      type: object
+      properties:
+        error_id:
+          type: string
+          format: uuid
+        row_number:
+          type: integer
+          description: 1-based, matching the source document rather than the array index.
+        error_code:
+          type: string
+          enum:
+            - required_missing
+            - bad_date
+            - bad_number
+            - duplicate_key
+            - unknown_column
+            - schema_invalid
+            - link_unresolved
+            - link_rule_violation
+        error_message:
+          type: string
+        source_row:
+          type: object
+          additionalProperties: true
+          description: The raw row as supplied, so the customer can see what failed.
+        created_at:
+          type: string
+          format: date-time

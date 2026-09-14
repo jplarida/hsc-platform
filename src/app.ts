@@ -19,6 +19,7 @@ import { rateLimit } from './middleware/rateLimit.js';
 import { auditGate, auditAccess } from './middleware/phiAudit.js';
 import { cors, ipRateLimit } from './middleware/edge.js';
 import { recordsRouter } from './routes/records.js';
+import { importsRouter } from './routes/imports.js';
 
 export function createApp(): Express {
   const app = express();
@@ -60,6 +61,7 @@ export function createApp(): Express {
   // 14b attaches to the response and records what was read once it succeeds.
   app.use('/v1', auditGate, authenticate, checkSession, bindTenant, rateLimit(), auditAccess);
   app.use('/v1/records', recordsRouter);
+  app.use('/v1/imports', importsRouter);
 
   // 17 — error handler, registered last so it wraps everything above.
   app.use(errorHandler);

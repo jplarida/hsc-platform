@@ -44,7 +44,7 @@ These have written specifications in this corpus. Building them is scheduling, n
 | `/webhooks` | Telling other systems something happened | `api/04` | |
 | `/audit-logs` | Letting a compliance officer *read* the history | `api/02`, `database/04` | Recording works; reading it back does not exist |
 | Any user interface | There are no screens at all | `frontend/01`–`07`, `UI_WIREFRAMES.md` | Everything above is the engine |
-| Tenant data import | Customer uploads their existing records | `database/07` Part B, `TENANT_ONBOARDING_FLOW.md`, `experience/01` | Schema landed in 0009; the loader itself is unbuilt |
+| ~~Tenant data import~~ | Customer uploads their existing records | `database/07` Part B, `TENANT_ONBOARDING_FLOW.md`, `experience/01` | **Built** — schema in 0009, loader and `/imports` in `src/imports/` |
 
 **Import caveat — resolved in the schema, 2026-09-11.** `database/07` Part B specifies the
 flow, the legacy field mapping, the validation and cleansing pass, throughput, and reversal
@@ -65,9 +65,34 @@ as written, each recorded in the migration itself:
   row; staging and row errors are per-source-row and would multiply the audit cost Part B
   already flags for large imports.
 
-Still unbuilt: the loader, the dry-run reporting, the two-pass link resolution and the
-reversal guard. The reversal guard is the load-bearing one — Part B requires reversal to
-refuse once a tenant has edited an imported record, or it destroys the tenant's own work.
+**The loader followed, 2026-09-13.** `/imports`, `/imports/{id}`, `/imports/{id}/errors` and
+`/imports/{id}/reverse` were added to `openapi.yaml` first — requests validate out of that
+document, so a handler cannot precede its contract — and `api/05` no longer lists `/imports`
+as outstanding. The pipeline is `src/imports/`: stage, cleanse, validate, dry-run report,
+load, second-pass link resolution, reconcile, reverse. 36 tests.
+
+Three things about it bear on the rest of this register:
+
+- **The job runner arrived, import-shaped.** Part D said specify it before any of C1–C4; this
+  built one for a single feature instead. A Redis Stream consumer group on the STATE instance
+  carries a *signal* — job id, tenant, actor — while every fact about a job stays in
+  `import_jobs`, so a lost message makes an import late rather than lost and a duplicated one
+  is absorbed by a conditional `UPDATE`. Batch PDF, batch email and bulk export need the same
+  substrate, and generalising this is a smaller job than starting one.
+- **`app_platform` needed a grant it did not have** (migration 0010) for the sweep that finds
+  jobs whose signal was lost. Third time: BYPASSRLS is an exemption from row policies, not a
+  privilege on the table, and in a background task the symptom is work that silently never
+  happens rather than an error anyone sees.
+- **The reversal guard is built and rests on a schema property worth knowing.**
+  `updated_at > created_at` distinguishes an edited record from an untouched one only because
+  `bump_record_version()` is BEFORE **UPDATE** and both columns take `DEFAULT NOW()` — the same
+  transaction timestamp — on insert. A future BEFORE INSERT trigger touching `updated_at`
+  would make every reversal refuse. There is a test asserting the equality directly, so the
+  property fails loudly rather than silently.
+
+Still unbuilt: importing from a stored file. Part B's flow starts at an uploaded document and
+`/files` does not exist, so rows are supplied inline and bounded at 5,000 per request; a
+`source_file_id` is refused rather than accepted and quietly ignored.
 
 ---
 

@@ -40,9 +40,9 @@ forever.
 | | |
 |---|---|
 | Design documents | 71 markdown files, Phases 1–8, 42 of 45 checklist items |
-| Database schema | 8 migrations, 79 tables, 65 under row-level security |
-| API | Full middleware pipeline, 4 of 14 specified paths implemented |
-| Tests | 175, all passing from an empty database |
+| Database schema | 10 migrations, 83 tables, 69 under row-level security |
+| API | Full middleware pipeline, 8 of 18 specified paths implemented |
+| Tests | 211, all passing from an empty database |
 
 Everything runs locally from nothing:
 
@@ -52,7 +52,7 @@ cp .env.example .env      # then fill in the compose values, see db/README.md
 npm run db:up             # postgres + two redis instances
 npm run db:migrate
 npm run db:seed
-npm test                  # 175 tests
+npm test                  # 211 tests
 ```
 
 ## What this is
@@ -84,7 +84,7 @@ documents/healthcare/     the design corpus — 71 documents across 10 areas
 
 prisma/migrations/        SQL-first schema. See db/README.md
 src/                      the API
-tests/                    175 tests, run serially against a real database
+tests/                    211 tests, run serially against a real database
 scripts/                  db lifecycle, seed, migration lint
 db/README.md              schema decisions, roles, and every defect found so far
 ```
@@ -132,10 +132,34 @@ error. Authentication comes first here, and a test fails if that is ever reorder
 [x] GET    /v1/records/{id}/links                   [ ] /audit-logs
 [x] POST   /v1/records/{id}/links
 [x] DELETE /v1/records/{id}/links/{link_id}
+[x] POST   /v1/imports
+[x] GET    /v1/imports/{id}
+[x] GET    /v1/imports/{id}/errors
+[x] POST   /v1/imports/{id}/reverse
 ```
 
 Responses are validated against `openapi.yaml` by contract tests, and requests are validated
 from the same document — so the two cannot drift without a test failing.
+
+### Imports are the one thing that outlives its request
+
+`POST /imports` returns `202` and a job URL; the work happens in a background worker. The
+queue is a Redis Stream on the STATE instance, and it carries **only a signal** — the job id,
+the tenant, the actor. Every fact about a job lives in `import_jobs`, so the two can never
+disagree about what is outstanding:
+
+- a lost signal makes an import *late*, not lost — a sweep re-enqueues it
+- a duplicated signal is absorbed by a conditional `UPDATE`, which is the real mutual
+  exclusion rather than the queue
+- the worker crosses tenants to *find* work and never to *do* it: the load runs as `app_user`
+  inside the job's own tenant, under RLS, like every other write path
+
+A **dry run is the default**, because the mapping loop is the feature: it stages, cleanses and
+validates every row, reports what would have happened, and writes nothing. Committing is the
+same mapping submitted again with `is_dry_run: false`.
+
+Reversal refuses once a tenant has edited an imported record. `database/07` is explicit that
+past that point reversal destroys the customer's own work rather than undoing ours.
 
 ## What the documents got wrong
 

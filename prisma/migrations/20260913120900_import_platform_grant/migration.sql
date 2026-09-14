@@ -1,0 +1,23 @@
+-- 0010 — Let the platform role see queued imports
+--
+-- The import worker finds work two ways. Normally a Redis Stream signal tells it which job
+-- to run. But a signal can be lost — Redis down when the job was created, the stream
+-- trimmed or flushed — and a lost signal must not mean a lost import, because `import_jobs`
+-- is the source of truth for job state and the queue is only a wake-up.
+--
+-- So there is a sweep that looks for `pending` jobs nothing has claimed. Finding work means
+-- looking across every tenant, which is what `app_platform` exists for — the same
+-- justification as the webhook delivery sweep and the usage rollup.
+--
+-- SELECT only, and deliberately. The sweep re-publishes a signal and stops there; the claim
+-- and the load still happen as `app_user` inside the job's own tenant, under RLS. Granting
+-- more here would make the importer the one write path in the platform not subject to
+-- tenant isolation, which RULE-HSC-02 treats as a compliance defect rather than a shortcut.
+--
+-- This is the third time this role has needed a grant it did not have, and the failure is
+-- the same shape every time: `app_platform` holds BYPASSRLS, which is an exemption from row
+-- policies and NOT a privilege on the table. A role can be exempt from every policy on a
+-- table it has no right to read. It fails as `permission denied for table import_jobs`
+-- inside a background task — where nobody is watching a response code, so the visible
+-- symptom is an import that stays queued rather than an error anyone sees.
+GRANT SELECT ON import_jobs TO app_platform;

@@ -42,6 +42,84 @@ function mostConstrained(decisions: readonly LimitDecision[]): LimitDecision {
     d.remaining / Math.max(d.limit, 1) < worst.remaining / Math.max(worst.limit, 1) ? d : worst);
 }
 
+/**
+ * A per-endpoint allowance, on top of the plan's buckets.
+ *
+ * `api/03` tabulates these separately from the plan limits for a reason: they exist to bound
+ * *cost*, not fairness. An import, a report generation or a bulk export is expensive enough
+ * that a tenant well inside its hourly request allowance can still overwhelm the platform
+ * with them. `LimitScope` already had `'endpoint'` and `keys.endpoint` already existed;
+ * only the middleware had nowhere to put one.
+ */
+export interface EndpointLimit {
+  /** Appears in the Redis key, so it must be stable across deploys. */
+  readonly name: string;
+  readonly limit: number;
+  readonly windowMs: number;
+  /** Per tenant, or per user within the tenant. `api/03` specifies which for each route. */
+  readonly per: 'tenant' | 'user';
+}
+
+/**
+ * A per-endpoint allowance, applied ON ITS OWN.
+ *
+ * Mounted per route, *after* the router-wide `rateLimit()` has already run. It therefore
+ * evaluates only its own bucket — re-evaluating the plan's rules here would consume two
+ * slots from the tenant's hourly allowance for a single request, which is a limiter that
+ * silently halves the limit it advertises.
+ */
+export function endpointRateLimit(endpoint: EndpointLimit) {
+  return async function limit(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const ctx = req.ctx;
+    if (!ctx) {
+      next(new ApiError('MISSING_AUTHORIZATION', 'No verified tenant context'));
+      return;
+    }
+
+    // Falls back to the tenant when there is no user — an API key or an app has no
+    // user_id, and keying them all on a literal "null" would put every one of them in a
+    // single shared bucket (partners/02, the same reasoning as the per-user rule).
+    const subject = endpoint.per === 'user' && ctx.userId && !ctx.appId
+      ? ctx.userId
+      : ctx.tenantId;
+
+    try {
+      const decision = await checkLimit({
+        key: keys.endpoint(ctx.tenantId, endpoint.name, subject),
+        limit: endpoint.limit,
+        windowMs: endpoint.windowMs,
+        scope: 'endpoint',
+      }, req.requestId);
+
+      // Same fail-open policy as the plan buckets, for the same reason: a degraded limiter
+      // must not become an outage. The plan's hourly bucket still applies underneath.
+      if (decision.indeterminate) {
+        res.setHeader('X-RateLimit-Degraded', '1');
+        next();
+        return;
+      }
+
+      const windowSeconds = Math.ceil(endpoint.windowMs / 1000);
+      if (!decision.allowed) {
+        setHeaders(res, decision, windowSeconds);
+        res.setHeader('Retry-After', decision.resetSeconds);
+        next(new ApiError('RATE_LIMIT_EXCEEDED', 'Rate limit exceeded', {
+          scope: 'endpoint',
+          retry_after: decision.resetSeconds,
+        }));
+        return;
+      }
+
+      // Headers are deliberately NOT set on the allowed path. The router-wide limiter has
+      // already described the plan buckets, and overwriting them with a 1-per-10-minutes
+      // policy would tell a client its whole allowance is one request an hour.
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
 export function rateLimit() {
   return async function limit(req: Request, res: Response, next: NextFunction): Promise<void> {
     const ctx = req.ctx;
@@ -92,13 +170,22 @@ export function rateLimit() {
         return;
       }
 
+      // Window per decision, taken from the rule that produced it rather than inferred
+      // from its scope. Inferring worked while every scope had exactly one window; an
+      // endpoint rule can carry any window at all — api/03 gives /imports ten minutes —
+      // and `RateLimit-Policy` announcing 3600 for a 600-second bucket tells a client to
+      // back off for the wrong hour.
+      const windowFor = (d: (typeof decisions)[number]): number => {
+        const rule = rules[decisions.indexOf(d)];
+        return Math.ceil((rule?.windowMs ?? HOUR_MS) / 1000);
+      };
+
       const binding = mostConstrained(decisions);
-      const windowSeconds = binding.scope === 'user' ? 60 : 3600;
-      setHeaders(res, binding, windowSeconds);
+      setHeaders(res, binding, windowFor(binding));
 
       const denied = decisions.find((d) => !d.allowed);
       if (denied) {
-        setHeaders(res, denied, denied.scope === 'user' ? 60 : 3600);
+        setHeaders(res, denied, windowFor(denied));
         res.setHeader('Retry-After', denied.resetSeconds);
         // `scope` tells the client whether backing off will help, or whether every user
         // in the tenant is blocked and waiting alone will not.
