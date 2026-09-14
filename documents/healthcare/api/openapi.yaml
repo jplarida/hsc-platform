@@ -1360,6 +1360,12 @@ components:
           * `link:<link_type>:<to_type_code>` — the column holds the *external id* of another
             record, resolved on a second pass once both sides exist
 
+        A `data.` segment may not be `__proto__`, `prototype` or `constructor`. The loader
+        builds the payload by walking that path and creating objects as it descends, so those
+        names would reach the JavaScript prototype chain rather than the record — a write
+        visible to every other tenant served by the same process. Whole segments only:
+        `data.constructor_name` is an ordinary field and is accepted.
+
         `transform` is the only cleansing applied. Anything not declared is left exactly as it
         arrived: guessing at a customer's data is how imports become untrustworthy.
       required: [source_column, target_path]
@@ -1370,6 +1376,7 @@ components:
         target_path:
           type: string
           maxLength: 255
+          pattern: '^(?:title|description|status|external_id|data[.](?!(?:__proto__|prototype|constructor)(?:[.]|$))[^."\\]+(?:[.](?!(?:__proto__|prototype|constructor)(?:[.]|$))[^."\\]+)*|link:[^:]+:[^:]+)$'
           example: data.mrn
         transform:
           type: string
