@@ -1,12 +1,32 @@
 # Status and TODO
 
 Coverage: hsc-platform:default
-**Last updated:** 2026-09-14 · branch `main`, ahead of `origin/main` by 4: the loader at
-`076d3df`, the `target_path` contract constraint at `baa5024`, and this note. Nothing
-has been pushed.
+**Last updated:** 2026-09-14 · branch `main`, **level with `origin/main` at `9e24136`**,
+working tree clean. The import loader and everything around it is pushed.
 **Read first:** `README.md` (what the project is), `documents/healthcare/IMPLEMENTATION_GAPS.md`
 (what is missing and whether it was ever specified), `db/README.md` (schema decisions and every
 defect found so far).
+
+---
+
+## Resume here
+
+**Nothing is half-finished.** The tree is clean, everything is pushed, and the last full
+verification was green. This is a clean stopping point, not an interrupted one — so resuming
+means picking up the next item, not reconstructing state.
+
+| | |
+|---|---|
+| Repository | `main` level with `origin/main` at `9e24136`, tree clean |
+| Last verification | 2026-09-14, from an empty volume, **224 of 224 green** |
+| Next action | **TODO 1 — the `auth_service` SECURITY DEFINER review.** It is a decision, not code |
+| Blocked on you | 6 decisions below; 1 and 2 gate everything user-facing |
+
+The next action is a human decision rather than an implementation task, which is the single
+most important thing to know before starting: picking up TODO 2 (`/auth/login`) without
+clearing TODO 1 first means building on a security decision nobody has reviewed. If the
+decisions cannot be made, **TODO 4 (`/audit-logs`) is the best unblocked work** — it is
+self-contained, needs no decision, and closes a real compliance gap.
 
 ---
 
@@ -33,8 +53,9 @@ before it reaches the router's own `badTargets` check, which had the friendlier 
 router check is kept as defence in depth rather than deleted — it is what covers mappings read
 back from the database in the worker.
 
-**Verified from an empty volume on 2026-09-14**, which the loader commit could not claim because
-Docker was unavailable at the time and its message says so. `db:nuke` → `db:migrate` →
+**Verified from an empty volume on 2026-09-14**, which the loader commit could not claim
+because the Docker engine was not reachable when it was written — wrongly diagnosed at the
+time as Docker not running, see the runbook below. `db:nuke` → `db:migrate` →
 `db:seed` → `npm test`: all ten migrations applied to a fresh database, lint clean at 83
 tables with 69 of 69 forced and a policy each, and **224 of 224 tests pass** in 23s. That
 exercises `20260913120900_import_platform_grant` on a fresh apply rather than against a
@@ -84,11 +105,23 @@ database that already had it — which matters here specifically, because a miss
 
 ```bash
 npm install
-npm run db:up          # postgres on 5433 + two redis instances
+npm run db:up          # postgres 5433, redis-cache 6379, redis-state 6381
 npm run db:migrate
 npm run db:seed        # 5 plans, 4 system roles, an 'acme' dev tenant
 npm test               # 224, serial — the suite MUST NOT run in parallel
 ```
+
+**Docker Desktop being *running* is not the same as its engine being *ready*.** The processes
+come up well before the daemon accepts connections, and in between, `docker compose` fails
+with `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified` —
+which reads like Docker is not installed. `docker version --format '{{.Server.Version}}'`
+is the check that actually means something. This cost a wrong diagnosis on 2026-09-14, and a
+commit message went out saying Docker was unavailable when it was merely still starting.
+
+**`db:nuke` reseeds with new UUIDs.** The `acme` tenant and its owner get fresh ids every
+time, and `npm run db:seed` prints both. Nothing should be hardcoded against them; if
+something breaks right after a nuke with a row simply not found, that is the first thing to
+suspect.
 
 `npm run db:nuke` destroys the volumes and starts clean. Every commit here is verified from an
 empty volume, not just against whatever the local database happens to hold — several of the
