@@ -1,7 +1,7 @@
 # Status and TODO
 
 Coverage: hsc-platform:default
-**Last updated:** 2026-09-14 · branch `main`, ahead of `origin/main` by 3: the loader at
+**Last updated:** 2026-09-14 · branch `main`, ahead of `origin/main` by 4: the loader at
 `076d3df`, the `target_path` contract constraint at `baa5024`, and this note. Nothing
 has been pushed.
 **Read first:** `README.md` (what the project is), `documents/healthcare/IMPLEMENTATION_GAPS.md`
@@ -33,6 +33,14 @@ before it reaches the router's own `badTargets` check, which had the friendlier 
 router check is kept as defence in depth rather than deleted — it is what covers mappings read
 back from the database in the worker.
 
+**Verified from an empty volume on 2026-09-14**, which the loader commit could not claim because
+Docker was unavailable at the time and its message says so. `db:nuke` → `db:migrate` →
+`db:seed` → `npm test`: all ten migrations applied to a fresh database, lint clean at 83
+tables with 69 of 69 forced and a policy each, and **224 of 224 tests pass** in 23s. That
+exercises `20260913120900_import_platform_grant` on a fresh apply rather than against a
+database that already had it — which matters here specifically, because a missing
+`app_platform` grant is invisible until the sweep runs.
+
 ---
 
 ## Where the project stands
@@ -43,7 +51,7 @@ back from the database in the worker.
 | Database | 10 migrations, 83 tables, 69 under row-level security |
 | API contract | 18 paths in `openapi.yaml` |
 | API implemented | 12 of 18 paths |
-| Tests | 224 — 211 serial against the database, plus 13 pure unit tests |
+| Tests | 224, serial, green from an empty volume |
 
 ### Implemented
 
@@ -79,7 +87,7 @@ npm install
 npm run db:up          # postgres on 5433 + two redis instances
 npm run db:migrate
 npm run db:seed        # 5 plans, 4 system roles, an 'acme' dev tenant
-npm test               # 211, serial — the suite MUST NOT run in parallel
+npm test               # 224, serial — the suite MUST NOT run in parallel
 ```
 
 `npm run db:nuke` destroys the volumes and starts clean. Every commit here is verified from an
