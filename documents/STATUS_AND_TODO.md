@@ -1,8 +1,10 @@
 # Status and TODO
 
 Coverage: hsc-platform:default
-**Last updated:** 2026-09-14 · branch `main`, **level with `origin/main` at `9e24136`**,
-working tree clean. The import loader and everything around it is pushed.
+**Last updated:** 2026-09-14 · branch `main`. Everything through `9e24136` is pushed: the
+import loader, the `target_path` contract constraint, and the empty-volume verification.
+This note can itself sit a commit or two ahead of `origin/main` — `git status -sb` is the
+authority on that, not this line.
 **Read first:** `README.md` (what the project is), `documents/healthcare/IMPLEMENTATION_GAPS.md`
 (what is missing and whether it was ever specified), `db/README.md` (schema decisions and every
 defect found so far).
@@ -11,13 +13,13 @@ defect found so far).
 
 ## Resume here
 
-**Nothing is half-finished.** The tree is clean, everything is pushed, and the last full
-verification was green. This is a clean stopping point, not an interrupted one — so resuming
-means picking up the next item, not reconstructing state.
+**Nothing is half-finished.** No feature was left mid-implementation, no test was left failing,
+and the last full verification was green. This is a clean stopping point rather than an
+interrupted one — so resuming means picking up the next item, not reconstructing state.
 
 | | |
 |---|---|
-| Repository | `main` level with `origin/main` at `9e24136`, tree clean |
+| Repository | `main`; pushed through `9e24136`. Confirm with `git status -sb` |
 | Last verification | 2026-09-14, from an empty volume, **224 of 224 green** |
 | Next action | **TODO 1 — the `auth_service` SECURITY DEFINER review.** It is a decision, not code |
 | Blocked on you | 6 decisions below; 1 and 2 gate everything user-facing |
@@ -111,6 +113,10 @@ npm run db:seed        # 5 plans, 4 system roles, an 'acme' dev tenant
 npm test               # 224, serial — the suite MUST NOT run in parallel
 ```
 
+`npm run db:nuke` destroys the volumes and starts clean. Every commit here is verified from an
+empty volume, not just against whatever the local database happens to hold — several of the
+recorded defects only appear on a fresh apply.
+
 **Docker Desktop being *running* is not the same as its engine being *ready*.** The processes
 come up well before the daemon accepts connections, and in between, `docker compose` fails
 with `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified` —
@@ -122,10 +128,6 @@ commit message went out saying Docker was unavailable when it was merely still s
 time, and `npm run db:seed` prints both. Nothing should be hardcoded against them; if
 something breaks right after a nuke with a row simply not found, that is the first thing to
 suspect.
-
-`npm run db:nuke` destroys the volumes and starts clean. Every commit here is verified from an
-empty volume, not just against whatever the local database happens to hold — several of the
-recorded defects only appear on a fresh apply.
 
 ---
 
