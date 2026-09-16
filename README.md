@@ -81,10 +81,12 @@ documents/healthcare/     the design corpus — 71 documents across 10 areas
   database/               ERDs, indexing, migrations, scaling
   frontend/  infrastructure/  observability/  analytics/
   experience/  interoperability/  performance/  partners/
+documents/CAPABILITIES.md      what is built and verified, as against what was designed
+documents/STATUS_AND_TODO.md   where the project stands, and what to do next
 
 prisma/migrations/        SQL-first schema. See db/README.md
 src/                      the API
-tests/                    211 tests, run serially against a real database
+tests/                    224 tests, run serially against a real database
 scripts/                  db lifecycle, seed, migration lint
 db/README.md              schema decisions, roles, and every defect found so far
 ```

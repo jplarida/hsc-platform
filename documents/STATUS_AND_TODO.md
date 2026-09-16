@@ -5,7 +5,8 @@ Coverage: hsc-platform:default
 import loader, the `target_path` contract constraint, and the empty-volume verification.
 This note can itself sit a commit or two ahead of `origin/main` — `git status -sb` is the
 authority on that, not this line.
-**Read first:** `README.md` (what the project is), `documents/healthcare/IMPLEMENTATION_GAPS.md`
+**Read first:** `README.md` (what the project is), `documents/CAPABILITIES.md` (what is
+actually built, as against what was designed), `documents/healthcare/IMPLEMENTATION_GAPS.md`
 (what is missing and whether it was ever specified), `db/README.md` (schema decisions and every
 defect found so far).
 
