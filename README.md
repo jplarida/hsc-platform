@@ -82,6 +82,7 @@ documents/healthcare/     the design corpus — 71 documents across 10 areas
   frontend/  infrastructure/  observability/  analytics/
   experience/  interoperability/  performance/  partners/
 documents/CAPABILITIES.md      what is built and verified, as against what was designed
+documents/ROADMAP.md           the subsystems with schema and no code, and a plan for them
 documents/STATUS_AND_TODO.md   where the project stands, and what to do next
 
 prisma/migrations/        SQL-first schema. See db/README.md

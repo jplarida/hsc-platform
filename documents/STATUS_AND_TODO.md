@@ -134,6 +134,12 @@ suspect.
 
 ## TODO, in the order worth doing it
 
+`documents/ROADMAP.md` plans five subsystems that are absent from this list because they were
+never specified as endpoints — RBAC administration, tenant provisioning, configuration,
+retention and outbound. It proposes one change to the order below: **configuration before
+`/audit-logs`**, on the grounds that both are unblocked but nobody can use the twelve existing
+endpoints without it. Not yet accepted.
+
 ### 1. Clear the `auth_service` SECURITY DEFINER review
 **This is the longest-standing blocker in the project and it gates everything user-facing.**
 

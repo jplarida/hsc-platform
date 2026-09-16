@@ -9,6 +9,7 @@ to believe it has something it does not:
 | `documents/healthcare/` | What was *designed* — 71 documents, the specification corpus |
 | `documents/healthcare/IMPLEMENTATION_GAPS.md` | What is *missing*, and whether it was ever specified |
 | **this file** | What is *built*, working, and covered by tests |
+| `documents/ROADMAP.md` | What is missing that was never specified as an endpoint |
 | `documents/STATUS_AND_TODO.md` | Where we are and what to do next |
 
 **Verified against source at `82626f1` on 2026-09-16.** Everything listed here is exercised by
