@@ -1,6 +1,7 @@
 # Roadmap — the subsystems with schema and no code
 
-**Written 2026-09-16, against `dc52965`.**
+**Written 2026-09-16 against `dc52965`; amended 2026-09-17** when fixing the
+`/auth/verify-mfa` contract drift turned up two more tables with no code.
 
 This plans five subsystems that do not appear on any existing gap list, because every list so
 far describes *endpoints in the contract that are not built yet*. These are different: the
@@ -26,6 +27,7 @@ path, and no code**. Nothing in the test suite or the migration lint can notice 
 | `tenant_provisioning_tasks`, `tenant_domains` | none | no |
 | `retention_policies`, `retention_holds`, `purge_jobs` | none | no |
 | `partner_users`, `tenant_installed_packs` | none | no |
+| `mfa_methods`, `mfa_backup_codes` | none | no |
 | `user_devices` | none | no |
 
 Reproduce it with a loop over the `CREATE TABLE` names in `prisma/migrations/*/migration.sql`,
@@ -96,7 +98,19 @@ schema'd with a hashed token, an expiry, and a partial unique index permitting o
 invite per email per tenant — plus email verification and password reset.
 
 It needs a password hashing library. There is none in `package.json` today, which is worth
-knowing before this gets estimated as "one endpoint".
+knowing before this gets estimated as "one endpoint". `api/01` specifies **argon2id**, so the
+choice is made even though the dependency is absent. `scripts/seed.mjs` also writes
+`'PLACEHOLDER-NOT-A-VALID-HASH'` deliberately, so there is no working credential anywhere yet,
+not even in the dev tenant.
+
+**MFA is part of this phase and was missing from the audit above until 2026-09-17.**
+`mfa_methods` and `mfa_backup_codes` have no code, and the contract had no
+`/auth/verify-mfa` path at all while already answering `mfa_required` with a
+`challenge_id` — a dead end a client could be sent into with no way out. The path is now in
+`openapi.yaml`; nothing implements it. One loose end sits in code rather than the contract:
+`src/http/errors.ts` maps `MFA_REQUIRED` to **403**, while `api/01` and the contract both
+model the challenge as a **200** carrying a flag. The flow never raises that error, so the
+honest fix is probably to delete the code rather than branch on it.
 
 ## Phase D — Tenant provisioning
 

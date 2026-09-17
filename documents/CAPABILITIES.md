@@ -31,7 +31,7 @@ qualifier attached.
 
 ---
 
-## API endpoints — 12 of 18 contracted paths
+## API endpoints — 12 of 19 contracted paths
 
 | # | Method | Path | Functionality |
 |---|---|---|---|
@@ -93,6 +93,7 @@ qualifier attached.
 
 ```
 [ ] /auth/login, /auth/refresh, /auth/logout      BLOCKED — see STATUS_AND_TODO decision 1
+[ ] /auth/verify-mfa                              BLOCKED — see STATUS_AND_TODO decision 1
 [ ] /files, /files/{id}/download
 [ ] /sync/pull, /sync/push
 [ ] /records/{id}/advance

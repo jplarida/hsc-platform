@@ -17,7 +17,7 @@ the tooling that keeps it honest.
 
 | Area | Paths |
 |---|---|
-| Authentication | `/auth/login`, `/auth/refresh`, `/auth/logout` |
+| Authentication | `/auth/login`, `/auth/verify-mfa`, `/auth/refresh`, `/auth/logout` |
 | Records | `/records`, `/records/{id}`, `/records/{id}/links`, `/records/{id}/advance` |
 | Files | `/files`, `/files/{id}/download` |
 | Sync | `/sync/pull`, `/sync/push` |

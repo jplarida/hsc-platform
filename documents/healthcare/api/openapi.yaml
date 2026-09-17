@@ -80,6 +80,66 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /auth/verify-mfa:
+    post:
+      tags: [Authentication]
+      summary: Complete an MFA challenge and open the session
+      description: |
+        The second leg of the login exchange in `api/01`. `/auth/login` answers
+        `mfa_required: true` with a `challenge_id` when the account has an enrolled MFA
+        method, and this redeems that challenge for a token pair.
+
+        Without this path the contract was a dead end: it could put a client into a challenge
+        state with no endpoint to leave it. `api/01` has always specified the exchange; only
+        the contract was missing it.
+
+        The challenge is short-lived — `api/01` holds it in Redis for five minutes — so an
+        expired or unknown `challenge_id` is a 401 and the client starts again at
+        `/auth/login`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_id, code]
+              properties:
+                challenge_id:
+                  type: string
+                code:
+                  type: string
+                  description: |
+                    A TOTP code, or one of the user's backup codes. `api/01` consumes a
+                    backup code on use, so the same one cannot be presented twice.
+      responses:
+        '200':
+          description: Challenge satisfied; session opened
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/TokenPair'
+                          - type: object
+                            properties:
+                              user:
+                                $ref: '#/components/schemas/CurrentUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Account temporarily locked after repeated failures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /auth/refresh:
     post:
       tags: [Authentication]
@@ -1253,6 +1313,11 @@ components:
 
     LoginRequest:
       type: object
+      description: |
+        MFA is NOT submitted here. An earlier revision carried an `mfa_token` field, which
+        described a single-shot exchange while `api/01` specifies challenge-and-response
+        against `/auth/verify-mfa`. Two mechanisms for one thing is the drift rather than a
+        choice, and the field is removed in favour of the one the flow actually documents.
       required: [email, password, tenant_domain]
       properties:
         email:
@@ -1262,8 +1327,6 @@ components:
           type: string
           format: password
         tenant_domain:
-          type: string
-        mfa_token:
           type: string
         device_info:
           type: object

@@ -41,7 +41,7 @@ forever.
 |---|---|
 | Design documents | 71 markdown files, Phases 1–8, 42 of 45 checklist items |
 | Database schema | 10 migrations, 83 tables, 69 under row-level security |
-| API | Full middleware pipeline, 8 of 18 specified paths implemented |
+| API | Full middleware pipeline, 12 of 19 specified paths implemented |
 | Tests | 211, all passing from an empty database |
 
 Everything runs locally from nothing:

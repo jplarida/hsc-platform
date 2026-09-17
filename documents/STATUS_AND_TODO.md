@@ -73,8 +73,8 @@ database that already had it — which matters here specifically, because a miss
 |---|---|
 | Design documents | 71 files, Phases 1–8, 42 of 45 checklist items |
 | Database | 10 migrations, 83 tables, 69 under row-level security |
-| API contract | 18 paths in `openapi.yaml` |
-| API implemented | 12 of 18 paths |
+| API contract | 19 paths in `openapi.yaml` |
+| API implemented | 12 of 19 paths |
 | Tests | 224, serial, green from an empty volume |
 
 ### Implemented
@@ -94,6 +94,7 @@ database that already had it — which matters here specifically, because a miss
 
 ```
 [ ] /auth/login, /auth/refresh, /auth/logout      BLOCKED — see decision 1
+[ ] /auth/verify-mfa                              BLOCKED — see decision 1
 [ ] /files, /files/{id}/download
 [ ] /sync/pull, /sync/push
 [ ] /records/{id}/advance
