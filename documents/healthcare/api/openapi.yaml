@@ -1011,7 +1011,11 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     Forbidden:
-      description: Authenticated but not permitted, or over a plan quota.
+      description: |
+        Authenticated but not permitted: `INSUFFICIENT_PERMISSIONS` when the permission is
+        absent from the token, `TENANT_MISMATCH` when a header contradicts it,
+        `MFA_REQUIRED` when the route needs MFA and the session has not satisfied it, or
+        `QUOTA_EXCEEDED` when the tenant is over a plan limit.
       content:
         application/json:
           schema:

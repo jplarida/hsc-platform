@@ -107,10 +107,20 @@ not even in the dev tenant.
 `mfa_methods` and `mfa_backup_codes` have no code, and the contract had no
 `/auth/verify-mfa` path at all while already answering `mfa_required` with a
 `challenge_id` — a dead end a client could be sent into with no way out. The path is now in
-`openapi.yaml`; nothing implements it. One loose end sits in code rather than the contract:
-`src/http/errors.ts` maps `MFA_REQUIRED` to **403**, while `api/01` and the contract both
-model the challenge as a **200** carrying a flag. The flow never raises that error, so the
-honest fix is probably to delete the code rather than branch on it.
+`openapi.yaml`; nothing implements it.
+
+**MFA happens at two separate moments, and they are easy to conflate** — this document did, on
+2026-09-17, and said `MFA_REQUIRED` should probably be deleted. It should not. The two are:
+
+| Moment | Shape |
+|---|---|
+| Login handshake | `/auth/login` answers `200 {mfa_required: true, challenge_id}`, redeemed at `/auth/verify-mfa` |
+| Authorization | An already-authenticated request whose session has `mfa_verified: false` hits a route requiring MFA — `403 MFA_REQUIRED` (`api/01` authorization flowchart, and its error catalogue) |
+
+`src/http/errors.ts` maps `MFA_REQUIRED` to 403 for the second, which is correct and should
+stay. What is missing is the **enforcement**, and that is Phase C work rather than a defect:
+nothing reads `sessions.mfa_verified`, and no route has any way to declare that it requires
+MFA. The error code is waiting for a check that was never built.
 
 ## Phase D — Tenant provisioning
 
