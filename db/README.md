@@ -5,20 +5,29 @@ Prisma generates the typed client from the live database and does not own the sc
 
 ## Status
 
-**The schema runs and the tests pass.** All ten migrations apply cleanly from an empty
-database, and the 224 tests in `tests/` pass — verified from a freshly recreated volume,
-serially, on 2026-09-14. Nothing under `src/`, `tests/`, `prisma/` or `scripts/` has changed
-since, so that number is current rather than merely the last one recorded.
+**The schema runs and the tests pass.** All eleven migrations apply cleanly from an empty
+database and the tests in `tests/` pass — verified from a freshly recreated volume, serially,
+on **2026-09-22: 230 of 230 green**.
+
+That run also settled two things about migration 0011 that static checks could not. `GRANT
+auth_definer TO <owner>` is usable by the `ALTER FUNCTION … OWNER TO` in the same transaction,
+so the migration needed no splitting. And the live catalogue was inspected directly rather than
+inferred from the migration having run: `auth_resolve_login` is owned by `auth_definer`, which
+holds neither `SUPERUSER` nor `BYPASSRLS`, with `search_path=public, pg_temp`, three `SELECT`
+grants and three `FOR SELECT` policies and nothing else.
+
+**It also disproved the finding that produced 0011 as originally written** — see defect 16,
+and defect 18 for what that turned into.
 
 ```
 npm run db:up        # docker compose up -d
 npm run db:migrate   # prisma migrate deploy
 npm run db:seed      # 5 plans, 4 system roles, an 'acme' dev tenant
-npm test             # 224 pass, 0 fail
+npm test             # 230 pass, 0 fail
 ```
 
 `npm run lint:migrations` needs no database and re-derives the shape of the schema —
-currently 10 migrations, 83 tables, 61 tenant-scoped, 69 with RLS enabled, forced and
+currently 11 migrations, 83 tables, 61 tenant-scoped, 69 with RLS enabled, forced and
 policied. Prefer running it over quoting the counts below, which are the ones that drift.
 
 Migration 0009 was added later than the rest and for a different reason: `database/07`
@@ -40,16 +49,26 @@ compose file; nothing in it is a real secret.
 > gives no reason to trust the ones still on it.
 
 - **The `deepmerge-ts` override** (`package.json`) forces a transitive dependency past a
-  major version. `prisma validate` and all ten migrations pass through it, but config paths
+  major version. `prisma validate` and all eleven migrations pass through it, but config paths
   those do not exercise remain untested.
 - **`data_audit_log.changed_by` is an open design question** — see defect 13 below. Not a
   bug to fix blindly; it needs a decision. Still open, and now tracked as decision 4 in
   `documents/STATUS_AND_TODO.md`.
-- **The `auth_service` `SECURITY DEFINER` security review** (`database/02` OQ4) has never
-  happened. See defect 5 below for what was implemented and why. This is the longest-standing
-  blocker in the project: it gates `/auth/login`, and therefore everything user-facing.
+- **`FORCE ROW LEVEL SECURITY` is inert on the Docker stack**, because its owner role is a
+  superuser — defect 18. Not a patch; it needs a decision about the dev stack.
 
 **Closed, and recorded so the correction is visible:**
+
+- ~~The `auth_service` `SECURITY DEFINER` security review (`database/02` OQ4).~~ **Reviewed
+  2026-09-22; the deviation is approved.** `BYPASSRLS` is a cluster-wide role attribute and
+  cannot be scoped to `tenant_users` as database/02 asks (defect 5), so granting it would have
+  exempted the login role from RLS on all 69 RLS tables. The `SECURITY DEFINER` function is a
+  fixed query returning seven columns for one `(subdomain, email)` pair, executable only by
+  `auth_service`, and it filters on the subdomain — so it is not a cross-tenant email oracle.
+  The review found the function could never return a row (defect 16) and one hardening gap
+  (defect 17); 0011 fixes the first and half of the second. **`EXECUTE` on this function is
+  equivalent to reading any user's password hash in any tenant given a subdomain and an email,
+  so the grant surface must stay exactly as narrow as it is.**
 
 - ~~No seed data.~~ Closed by `5d65c7e` (2026-09-01). `npm run db:seed` produces 5 plans —
   `partner_sandbox` among them, so the `partners/01` requirement is met — 4 system role
@@ -68,7 +87,7 @@ compose file; nothing in it is a real secret.
 `npm test` passes `--test-concurrency=1`. The test files share one database and teardown
 toggles triggers on shared tables; run in parallel they race, and the symptom is a
 *shifting* set of failures rather than a consistent one. Two debugging rounds were spent
-on noise from this before it was diagnosed. The count has grown from four files to fifteen
+on noise from this before it was diagnosed. The count has grown from four files to sixteen
 since that was written, which makes the flag more load-bearing rather than less.
 
 A related trap, since it presents the same way: `node --test … | head -N` buffers, and a
@@ -125,6 +144,7 @@ prisma/
     20260901120700_partner_ecosystem/       partners, apps, consent, marketplace, payouts
     20260911120800_tenant_data_import/      import jobs, mappings, staging, row errors
     20260913120900_import_platform_grant/   app_platform SELECT, for the import sweep
+    20260922121000_auth_resolve_login_definer/  auth_definer owns the login lookup
 scripts/
   db-create.mjs                     creates the dev database and owner role
   lint-migrations.mjs               static checks; encodes database/07's per-table checklist
@@ -158,7 +178,7 @@ cp .env.example .env        # or write the compose values, see below
 npm run db:up               # postgres + both redis instances
 npm run db:migrate          # prisma migrate deploy
 npm run db:seed             # plans, system roles, the 'acme' dev tenant
-npm test                    # 224 tests, serial
+npm test                    # 230 tests, serial
 
 npm run lint:migrations     # static checks, no database needed
 npm run db:pull             # re-introspect into schema.prisma after a new migration
@@ -183,7 +203,7 @@ does not contain `dev` or `test`.
 
 `tests/` asserts the boundaries the schema exists to enforce. **There has been an application
 since 2026-09-03**, and the suite has grown with it: the four schema files below were the whole
-suite when this section was written, and there are now fifteen. `infrastructure/02` writes the
+suite when this section was written, and there are now sixteen. `infrastructure/02` writes the
 same tests against a Prisma `withTenantContext` helper; these use `pg` directly, which is what
 that helper would wrap.
 
@@ -200,6 +220,10 @@ The remaining eleven test the application over that schema, and are documented w
 than here: `api-caching`, `api-contract`, `api-idempotency`, `api-imports`, `api-isolation`,
 `api-phi-audit`, `api-ratelimit`, `api-record-detail`, `api-record-links`, `safe-logging` and
 `import-mapping`. The last two need no database.
+
+`auth-login-lookup.test.mjs` sits between the two groups: it tests the database boundary the
+login path depends on, and is listed here because defect 16 is a schema defect rather than an
+application one.
 
 Three of these are regression tests for defects the documents recorded but nothing had
 ever executed:
@@ -307,10 +331,105 @@ they are not rediscovered, and so they can be confirmed once the schema is appli
     the same transaction**. Nothing in 0009 uses it, so it applies. A migration that also
     inserted a policy row using the new value would fail.
 
+16. **`auth_resolve_login()` worked or returned nothing depending on how the database was
+    provisioned.** Found by the `database/02` OQ4 security review on 2026-09-22, not by a test,
+    because nothing calls the function and nothing covered it.
+
+    `tenant_users`, `tenants` and `mfa_methods` are all `ENABLE` + `FORCE ROW LEVEL SECURITY`
+    and the only policy on each is `tenant_isolation … FOR ALL TO app_user`. A `SECURITY
+    DEFINER` function executes as its owner, and the owner was whichever role applied 0002 —
+    so the outcome turned on whether that role was a superuser:
+
+    | Provisioning path | Owner | Result |
+    |---|---|---|
+    | `docker-compose.yml` (`POSTGRES_USER: hsc_owner`) | **SUPERUSER** | Bypasses RLS entirely. The lookup worked |
+    | `scripts/db-create.mjs` (`db:create:native`) | `CREATEROLE` only | Subject to `FORCE`, matches no policy, **zero rows for every input** |
+
+    **The review first recorded this as a flat "could never return a row", which was wrong** —
+    it was checked against the catalogue rather than against a running database, and the
+    running database is the superuser one. The correction matters in both directions: the
+    defect is real, but it is a works-here-fails-there difference rather than a dead function,
+    and that is the more dangerous shape. The Roles table above documents the intended owner as
+    "Subject to `FORCE`", which is the failing configuration.
+
+    **Related to fault 4 / defect 3**, which fixed the same deadlock for the audit trigger by
+    giving its owner a narrow policy. The pattern worth naming: *any* `SECURITY DEFINER`
+    function here needs its owner to match a policy on every table it touches — or to be a
+    superuser, which is not something to rely on. Both failures are silent: no error, just an
+    empty result.
+
+    **The suite could not have caught it, and still could not.** `schema-invariants` asserts
+    that `relforcerowsecurity` is *set*; nothing asserts that `FORCE` has any *effect*. Against
+    a superuser-owned database it has none, so every owner-path RLS assertion in the suite is
+    vacuous there.
+
+    Fixed by 0011, which gives the function a dedicated `auth_definer` owner — a plain role,
+    no superuser, no `BYPASSRLS` — holding `SELECT` on exactly those three tables with three
+    `FOR SELECT` policies. The point is that it now reads **by policy rather than by bypass**,
+    so it behaves identically under both provisioning paths. Owner policies would have been
+    cheaper and were rejected: they would have widened owner access on the native path while
+    changing nothing on the Docker one.
+
+    `tests/auth-login-lookup.test.mjs` asserts a real user resolves to exactly one row, and —
+    the assertion that actually holds the line — that the function's owner is neither a
+    superuser nor a `BYPASSRLS` role.
+
+17. **Both `SECURITY DEFINER` functions had an unsafe `search_path`.** PostgreSQL searches the
+    temporary schema first for relations when `pg_temp` is not listed, so a session able to
+    create temp objects can shadow a table a definer function reads. `auth_resolve_login()` set
+    `search_path = public`, omitting it; 0011 now sets `public, pg_temp`.
+
+    **The audit trigger function (0004) sets no `search_path` at all, and is NOT fixed.** It
+    inserts into `data_audit_log` and calls `mask_sensitive()`, `current_actor_id()`,
+    `current_app_id()` and `current_installation_id()`, all unqualified, and `TEMP` on the
+    database has never been revoked from `PUBLIC`. Shadowing `data_audit_log` there would
+    redirect audit writes — audit evasion, which `RULE-HSC-02` classes as a compliance defect.
+
+    **Not reachable from the API today**, and the severity claim rests on that: every query in
+    `src/` is parameterised and role names go through the closed set in `src/db/context.ts`,
+    so there is no way to execute arbitrary SQL. This is defence in depth — it is what turns a
+    future SQL-injection read bug into audit evasion plus owner-privileged execution. Left
+    open deliberately rather than folded into 0011, because it is a different function, a
+    different migration and a different blast radius from the one OQ4 asked about.
+
+18. **`FORCE ROW LEVEL SECURITY` is inert in the environment the test suite runs against.**
+    The generalisation of 16, and the larger half of it. `docker-compose.yml` sets
+    `POSTGRES_USER: hsc_owner`, and the postgres image creates that role as a **SUPERUSER**.
+    Superusers bypass row-level security entirely, so on the Docker stack `FORCE` constrains
+    nobody — while `scripts/db-create.mjs` provisions the same logical role with `CREATEROLE`
+    and nothing else, where `FORCE` does constrain it.
+
+    The Roles table above says the migration owner is "Subject to `FORCE`". On the path
+    everything is actually developed and tested against, it is not.
+
+    Why it matters beyond the login function: `FORCE` is the control that stops a connection
+    holding the owner's credentials from reading across tenants, which is a `RULE-HSC-02`
+    guarantee. Every test that exercises an owner-side RLS boundary passes on the Docker stack
+    whether or not that boundary exists, and `schema-invariants` checks only that the *flag* is
+    set. A genuine owner-path isolation defect would ship green.
+
+    **Not fixed, and it is a decision rather than a patch.** Making the compose owner a
+    non-superuser means migration 0001 still needs `CREATEROLE`, the seed and teardown paths
+    need reviewing for anything that silently relied on bypass, and `db:nuke` has to keep
+    working from empty. That is its own piece of work. Recorded here so the next person does
+    not read a green suite as evidence that owner-side isolation holds.
+
 Items 1–4, 8 and 9 are new; 5–7 are corrections to documented claims; 10–13 were found by
 executing the schema, 14 in the application layer, and 15 by implementing a requirement
 that spanned two documents. Defects 8–15 were observed. Defects 1–7 were reasoned from the
 manual, and 1–4 were confirmed correct when the migrations applied first try.
+
+16–18 were found by the OQ4 security review. 16 was **first recorded wrongly** — reasoned
+from the catalogue, as 1–7 were, and stated as "the function can never return a row" without
+running it. The empty-volume run on 2026-09-22 disproved that: the function returned a row,
+because the owner on the Docker stack is a superuser. Correcting it produced 18, which is the
+more serious finding of the two. The lesson is the one 1–7 were careful about and this review
+was not: **a claim about RLS behaviour reasoned from the catalogue is a hypothesis until it is
+executed**, because the catalogue does not show you who is exempt.
+
+They share the other lesson with 15: each was invisible because the thing that would have
+noticed it did not exist. Nothing called `auth_resolve_login()`, and nothing asserts that
+`FORCE` has an effect rather than merely being set.
 
 ## Amendments folded in
 

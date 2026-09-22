@@ -1,10 +1,10 @@
 # Status and TODO
 
 Coverage: hsc-platform:default
-**Last updated:** 2026-09-14 · branch `main`. Everything through `9e24136` is pushed: the
-import loader, the `target_path` contract constraint, and the empty-volume verification.
-This note can itself sit a commit or two ahead of `origin/main` — `git status -sb` is the
-authority on that, not this line.
+**Last updated:** 2026-09-22 · branch `main`. The `auth_service` SECURITY DEFINER review is
+complete and migration 0011 is written but **never applied** — that verification is the next
+action. This note can itself sit a commit or two ahead of `origin/main` — `git status -sb` is
+the authority on that, not this line.
 **Read first:** `README.md` (what the project is), `documents/CAPABILITIES.md` (what is
 actually built, as against what was designed), `documents/healthcare/IMPLEMENTATION_GAPS.md`
 (what is missing and whether it was ever specified), `db/README.md` (schema decisions and every
@@ -20,16 +20,23 @@ interrupted one — so resuming means picking up the next item, not reconstructi
 
 | | |
 |---|---|
-| Repository | `main`; pushed through `9e24136`. Confirm with `git status -sb` |
-| Last verification | 2026-09-14, from an empty volume, **224 of 224 green** |
-| Next action | **TODO 1 — the `auth_service` SECURITY DEFINER review.** It is a decision, not code |
-| Blocked on you | 6 decisions below; 1 and 2 gate everything user-facing |
+| Repository | `main`. Confirm how far ahead of `origin/main` with `git status -sb` |
+| Last verification | **2026-09-22, from an empty volume, 230 of 230 green**, all eleven migrations |
+| Next action | **Decide on `db/README.md` defect 18** — FORCE RLS is inert on the Docker stack. Then TODO 2 |
+| Blocked on you | 5 decisions below, plus 4 in `ROADMAP.md`; decision 2 now gates `/auth/*` alone |
 
-The next action is a human decision rather than an implementation task, which is the single
-most important thing to know before starting: picking up TODO 2 (`/auth/login`) without
-clearing TODO 1 first means building on a security decision nobody has reviewed. If the
-decisions cannot be made, **TODO 4 (`/audit-logs`) is the best unblocked work** — it is
-self-contained, needs no decision, and closes a real compliance gap.
+**Migration 0011 is applied and verified**, and the login lookup now reads by policy rather
+than by superuser bypass. The review that produced it also produced a finding nobody was
+looking for: **`FORCE ROW LEVEL SECURITY` does nothing on the Docker stack**, because
+`docker-compose.yml` provisions the owner as a superuser, while `db:create:native` does not.
+That is a works-here-fails-there split in the control `RULE-HSC-02` rests on, and the suite
+cannot see it — see `db/README.md` defects 16 and 18. It needs a decision, not a patch.
+
+Decision 1 is **closed**: the `auth_service` SECURITY DEFINER review was completed on
+2026-09-22 and the deviation approved. That review found the login lookup could never return a
+row, which is what 0011 fixes. `/auth/login` is therefore blocked on decision 2 (email) rather
+than on a security question. If the decisions cannot be made, **TODO 4 (`/audit-logs`) is still
+the best unblocked work** — self-contained, needs no decision, and closes a real compliance gap.
 
 ---
 
@@ -72,10 +79,10 @@ database that already had it — which matters here specifically, because a miss
 | | |
 |---|---|
 | Design documents | 71 files, Phases 1–8, 42 of 45 checklist items |
-| Database | 10 migrations, 83 tables, 69 under row-level security |
+| Database | 11 migrations, 83 tables, 69 under row-level security |
 | API contract | 19 paths in `openapi.yaml` |
 | API implemented | 12 of 19 paths |
-| Tests | 224, serial, green from an empty volume |
+| Tests | 230, serial, green from an empty volume (2026-09-22) |
 
 ### Implemented
 
@@ -93,8 +100,8 @@ database that already had it — which matters here specifically, because a miss
 ### Not implemented
 
 ```
-[ ] /auth/login, /auth/refresh, /auth/logout      BLOCKED — see decision 1
-[ ] /auth/verify-mfa                              BLOCKED — see decision 1
+[ ] /auth/login, /auth/refresh, /auth/logout      needs decision 2 (email) + 0011 applied
+[ ] /auth/verify-mfa                              needs decision 2 (email) + 0011 applied
 [ ] /files, /files/{id}/download
 [ ] /sync/pull, /sync/push
 [ ] /records/{id}/advance
@@ -112,7 +119,7 @@ npm install
 npm run db:up          # postgres 5433, redis-cache 6379, redis-state 6381
 npm run db:migrate
 npm run db:seed        # 5 plans, 4 system roles, an 'acme' dev tenant
-npm test               # 224, serial — the suite MUST NOT run in parallel
+npm test               # 230, serial — the suite MUST NOT run in parallel
 ```
 
 `npm run db:nuke` destroys the volumes and starts clean. Every commit here is verified from an
@@ -141,15 +148,35 @@ retention and outbound. It proposes one change to the order below: **configurati
 `/audit-logs`**, on the grounds that both are unblocked but nobody can use the twelve existing
 endpoints without it. Not yet accepted.
 
-### 1. Clear the `auth_service` SECURITY DEFINER review
-**This is the longest-standing blocker in the project and it gates everything user-facing.**
+### 1. ~~Clear the `auth_service` SECURITY DEFINER review~~ — DONE 2026-09-22, but verify 0011
+**The review is complete and the deviation is approved.** `BYPASSRLS` is a cluster-wide role
+attribute that cannot be scoped to `tenant_users` as `database/02` asks, so granting it would
+have exempted the login role from RLS on all 69 RLS tables. The `SECURITY DEFINER` function is
+a fixed query returning seven columns for one `(subdomain, email)` pair, executable only by
+`auth_service`, and it filters on the subdomain — so it is not a cross-tenant email oracle.
 
-`database/02` open question 4 asks for a security review of the decision to give `auth_service`
-a `SECURITY DEFINER` function instead of `BYPASSRLS`. The reasoning was sound — `BYPASSRLS` is a
-cluster-wide role attribute and would have exempted the login role from RLS on `records` too —
-but the review it asked for has never happened, and `/auth/login` is the path that uses it.
+**The review's main finding was not the decision it was asked for.** `auth_resolve_login()`
+could never return a row: all three tables it reads are `FORCE` RLS with an `app_user`-only
+policy, and a `SECURITY DEFINER` function runs as its owner, which matches no policy and is
+therefore denied by default. Login would have failed as "user not found" for every input, and
+nothing could have noticed — no caller, no test. Recorded as `db/README.md` defect 16.
 
-Until this clears, there is no login, and without login there is no user interface.
+Migration 0011 fixes it by giving the function a dedicated `auth_definer` owner that owns
+nothing else, holds `SELECT` on exactly those three tables, and is named in three `FOR SELECT`
+policies. **It has not been applied to a database.** Running it is the next action above.
+
+**One correction worth knowing, because it was committed in an earlier form.** The review
+first reported that the login lookup "could never return a row". That was reasoned from the
+catalogue and disproved by running it: the owner is a superuser on this stack, so it worked.
+The defect is real on the native path and the fix stands, but the shape is different and the
+generalisation (defect 18) is the more serious half.
+
+Two other things came out of the review and are NOT done:
+- **The audit trigger sets no `search_path`** (`db/README.md` defect 17). Same class as the
+  login function's, larger blast radius, not reachable from the API today. Needs its own call.
+- **`auth_service` holds no grant on any table**, so it cannot increment `failed_login_count`,
+  set `locked_until`, or create a session. Login needs a second phase after the lookup, and
+  `src/db/context.ts` knows only `app_user` and `app_platform`. That is TODO 2's design work.
 
 ### 2. Build `/auth/login`, `/refresh`, `/logout`
 Specified in `api/01` and already in `openapi.yaml`. Needs decision 2 below (email) resolved,
@@ -186,7 +213,7 @@ These cannot be resolved by reading the code. Several have been open since 2026-
 
 | # | Decision | Blocks |
 |---|---|---|
-| 1 | **`auth_service` SECURITY DEFINER review** (`database/02` OQ4) | `/auth/login`, therefore everything user-facing |
+| ~~1~~ | ~~**`auth_service` SECURITY DEFINER review** (`database/02` OQ4)~~ **CLOSED 2026-09-22** — deviation approved; see TODO 1 | nothing; superseded by verifying 0011 |
 | 2 | **Is email in scope now?** It is a prerequisite of login, not a marketing feature — `api/01` authenticates by email address. A vendor touching PHI needs a **BAA**, which is a procurement lead time rather than a config flag | `/auth/*`, notifications, anything outbound |
 | 3 | **The vertical** — clinical healthcare, or workplace health and safety? Does not block the schema; decides the first industry pack, whether PHI is the common case, and the last three checklist items | 6.3 (FHIR), the first industry pack |
 | 4 | **`data_audit_log.changed_by`** — an FK to `tenant_users`, so anyone who has ever written cannot be deleted for the six-year retention window, while `user_audit_log.user_email` is denormalised *specifically* to survive user deletion. Both cannot be intended; interacts with GDPR erasure | Tenant offboarding, GDPR erasure |
