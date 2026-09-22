@@ -6,14 +6,20 @@ Prisma generates the typed client from the live database and does not own the sc
 ## Status
 
 **The schema runs and the tests pass.** All ten migrations apply cleanly from an empty
-database, and the 211 tests in `tests/` pass — verified from a freshly recreated volume,
-serially.
+database, and the 224 tests in `tests/` pass — verified from a freshly recreated volume,
+serially, on 2026-09-14. Nothing under `src/`, `tests/`, `prisma/` or `scripts/` has changed
+since, so that number is current rather than merely the last one recorded.
 
 ```
 npm run db:up        # docker compose up -d
 npm run db:migrate   # prisma migrate deploy
-npm test             # 211 pass, 0 fail
+npm run db:seed      # 5 plans, 4 system roles, an 'acme' dev tenant
+npm test             # 224 pass, 0 fail
 ```
+
+`npm run lint:migrations` needs no database and re-derives the shape of the schema —
+currently 10 migrations, 83 tables, 61 tenant-scoped, 69 with RLS enabled, forced and
+policied. Prefer running it over quoting the counts below, which are the ones that drift.
 
 Migration 0009 was added later than the rest and for a different reason: `database/07`
 Part B specified tenant data import in full and **its tables were never extracted**, which
@@ -28,24 +34,45 @@ compose file; nothing in it is a real secret.
 
 ### Still outstanding
 
-- **No seed data.** `permissions` and `app_scopes` are seeded by migrations, but there are
-  no `plans`, no system `roles`, and no dev tenant — the database comes up empty and is
-  not manually explorable. The `partner_sandbox` plan row that `partners/01` requires is
-  among the missing. Tests build their own fixtures, so this blocks exploration, not CI.
-- **`prisma db pull` has not been run**, so `schema.prisma` still has no model blocks and
-  no typed client exists. This is the next hard blocker for any application code.
+> Revised 2026-09-22. The first two entries had been wrong since `5d65c7e` (2026-09-01) —
+> the commit that closed them was the one that should have edited this list. Both are kept
+> below as struck records rather than deleted, because a list that silently loses entries
+> gives no reason to trust the ones still on it.
+
 - **The `deepmerge-ts` override** (`package.json`) forces a transitive dependency past a
-  major version. `prisma validate` and eight migrations pass through it, but config paths
+  major version. `prisma validate` and all ten migrations pass through it, but config paths
   those do not exercise remain untested.
 - **`data_audit_log.changed_by` is an open design question** — see defect 13 below. Not a
-  bug to fix blindly; it needs a decision.
+  bug to fix blindly; it needs a decision. Still open, and now tracked as decision 4 in
+  `documents/STATUS_AND_TODO.md`.
+- **The `auth_service` `SECURITY DEFINER` security review** (`database/02` OQ4) has never
+  happened. See defect 5 below for what was implemented and why. This is the longest-standing
+  blocker in the project: it gates `/auth/login`, and therefore everything user-facing.
+
+**Closed, and recorded so the correction is visible:**
+
+- ~~No seed data.~~ Closed by `5d65c7e` (2026-09-01). `npm run db:seed` produces 5 plans —
+  `partner_sandbox` among them, so the `partners/01` requirement is met — 4 system role
+  templates with their permission grants, and an `acme` dev tenant carrying a configuration
+  row, a subscription, two record type definitions, an owner user and that user's role
+  assignment. **`db:seed` reseeds with fresh UUIDs after a `db:nuke`**, so nothing should be
+  hardcoded against the ids it prints.
+- ~~`prisma db pull` has not been run.~~ Also closed by `5d65c7e`. `schema.prisma` now holds
+  79 generated model blocks, and its header carries the warning against `prisma migrate dev`.
+  The claim that this was "the next hard blocker for any application code" was wrong in its
+  own right: the application that arrived on 2026-09-03 uses `pg` directly and does not
+  depend on the generated client at all.
 
 ### The suite must run serially
 
-`npm test` passes `--test-concurrency=1`. The four files share one database and teardown
+`npm test` passes `--test-concurrency=1`. The test files share one database and teardown
 toggles triggers on shared tables; run in parallel they race, and the symptom is a
 *shifting* set of failures rather than a consistent one. Two debugging rounds were spent
-on noise from this before it was diagnosed.
+on noise from this before it was diagnosed. The count has grown from four files to fifteen
+since that was written, which makes the flag more load-bearing rather than less.
+
+A related trap, since it presents the same way: `node --test … | head -N` buffers, and a
+full passing run behind a pipe looks exactly like a hang. Redirect to a file instead.
 
 ### What tests cannot cover
 
@@ -59,7 +86,11 @@ exercised only with auditing off, so audit-on-delete behaviour is untested.
 
 ## Why not Prisma-first
 
-Counted across `documents/healthcare/database/`, `api/` and `partners/`, the schema uses:
+Counted across the **design documents** — `documents/healthcare/database/`, `api/` and
+`partners/` — as they stood when the decision was taken. These are not counts of
+`prisma/migrations/`, and should not be read as current: the migrations have since grown to
+69 RLS tables and 14 triggers, and `npm run lint:migrations` is what reports the live figures.
+The argument does not turn on the numbers, only on the column at the right.
 
 | Feature | Count | Prisma schema language |
 |---|---|---|
@@ -126,11 +157,12 @@ npm install
 cp .env.example .env        # or write the compose values, see below
 npm run db:up               # postgres + both redis instances
 npm run db:migrate          # prisma migrate deploy
-npm test                    # 211 tests, serial
+npm run db:seed             # plans, system roles, the 'acme' dev tenant
+npm test                    # 224 tests, serial
 
 npm run lint:migrations     # static checks, no database needed
-npm run db:pull             # introspect into schema.prisma (not yet run)
-npm run db:nuke             # destroy volumes and start clean
+npm run db:pull             # re-introspect into schema.prisma after a new migration
+npm run db:nuke             # destroy volumes and start clean — reseeds with NEW UUIDs
 ```
 
 For the compose stack, `.env` wants:
@@ -149,10 +181,13 @@ does not contain `dev` or `test`.
 
 ## Tests
 
-`tests/` asserts the boundaries the schema exists to enforce. They test the **database**,
-not the application — there is no application yet. `infrastructure/02` writes the same
-tests against a Prisma `withTenantContext` helper; these use `pg` directly, which is what
+`tests/` asserts the boundaries the schema exists to enforce. **There has been an application
+since 2026-09-03**, and the suite has grown with it: the four schema files below were the whole
+suite when this section was written, and there are now fifteen. `infrastructure/02` writes the
+same tests against a Prisma `withTenantContext` helper; these use `pg` directly, which is what
 that helper would wrap.
+
+The four that test the **database** itself, which is what this README is about:
 
 | File | Asserts |
 |---|---|
@@ -160,6 +195,11 @@ that helper would wrap.
 | `tenant-isolation.test.mjs` | Cross-tenant reads and counts, forged `tenant_id` on write, cross-tenant links, the pooled-connection GUC leak, fail-closed with no context |
 | `audit.test.mjs` | Trigger fires on `records`, `tenant_users` and `files` (fault 1), no-op updates write nothing, credentials masked, immutability under both `app_user` and the owner, actor attribution including `app_id` |
 | `partner-isolation.test.mjs` | Partner axis: own apps only, own installs only, own usage only, and no privilege at all on tenant tables |
+
+The remaining eleven test the application over that schema, and are documented with it rather
+than here: `api-caching`, `api-contract`, `api-idempotency`, `api-imports`, `api-isolation`,
+`api-phi-audit`, `api-ratelimit`, `api-record-detail`, `api-record-links`, `safe-logging` and
+`import-mapping`. The last two need no database.
 
 Three of these are regression tests for defects the documents recorded but nothing had
 ever executed:
@@ -181,8 +221,8 @@ otherwise found in production by the wrong person.
 
 The specification documents were written against SQL that had never been run. These are
 failures that would only appear on execution — found by reading the DDL against the
-PostgreSQL manual, **not** by running it (see LIMITATIONS above). Recorded so they are not
-rediscovered, and so they can be confirmed once the schema is applied:
+PostgreSQL manual, **not** by running it (see "What tests cannot cover" above). Recorded so
+they are not rediscovered, and so they can be confirmed once the schema is applied:
 
 1. **`to_tsvector('english', …)` in a generated column is rejected.** The two-argument
    text form is `STABLE`; a generation expression must be `IMMUTABLE`. Needs
@@ -286,6 +326,6 @@ the migration that owns the table; two are JSONB conventions, documented at
 | `sessions.impersonated_by` | `sessions` | `experience/02` |
 | `apps:install` permission | `permissions` seed | `partners/02` |
 | `app_id` / `installation_id` | both audit tables | `partners/02` |
-| `partner_sandbox` plan | seed data — **not yet written** | `partners/01` |
+| `partner_sandbox` plan | `scripts/seed.mjs` — written, not public, carries real limits | `partners/01` |
 | `phi_class` annotations | `form_versions.schema` convention | `analytics/01` |
 | `{system, code, display}` | `form_versions.schema` convention | `interoperability/01` |
